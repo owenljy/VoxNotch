@@ -16,16 +16,55 @@ struct GeneralTab: View {
   @Bindable private var settings = SettingsManager.shared
   private var updateManager = UpdateManager.shared
   @State private var loginItemError: String?
+  @State private var loginItemStatus = SMAppService.mainApp.status
   @State private var modelManager = FluidAudioModelManager.shared
   @State private var mlxModelManager = MLXAudioModelManager.shared
   @State private var showDeleteAllConfirmation = false
 
   private var isLoginItemEnabled: Bool {
-    SMAppService.mainApp.status == .enabled
+    loginItemStatus == .enabled || loginItemStatus == .requiresApproval
   }
 
   var body: some View {
     Form {
+      // MARK: Startup
+      Section {
+        Toggle(isOn: Binding(
+          get: { isLoginItemEnabled },
+          set: { newValue in
+            updateLoginItem(enabled: newValue)
+          }
+        )) {
+          InfoLabel(title: "Launch VoxNotch at login", tooltip: "Automatically start VoxNotch when you log into your Mac.")
+        }
+        if loginItemStatus == .requiresApproval {
+          Text("Allow VoxNotch in System Settings → General → Login Items to finish enabling automatic startup.")
+            .font(InterfaceScale.Typography.body)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          Button("Open Login Items Settings") {
+            SMAppService.openSystemSettingsLoginItems()
+          }
+        } else if loginItemStatus == .notFound {
+          Text("macOS could not find the app's login item. Move VoxNotch to Applications and open it again.")
+            .font(InterfaceScale.Typography.body)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if let error = loginItemError {
+          Text(error)
+            .font(InterfaceScale.Typography.caption)
+            .foregroundStyle(.red)
+        }
+      } header: {
+        Text("Startup")
+          .settingsSectionHeading()
+      } footer: {
+        Text("Start VoxNotch automatically in the menu bar when you log into your Mac, including after a restart.")
+          .settingsSectionNote()
+      }
+
       // MARK: Setup
       Section {
         Button("Run Setup Wizard Again\u{2026}") {
@@ -38,35 +77,6 @@ struct GeneralTab: View {
           .settingsSectionHeading()
       } footer: {
         Text("Re-run the first-time setup to configure permissions, download models, and review the tutorial.")
-          .settingsSectionNote()
-      }
-
-      // MARK: Startup
-      Section {
-        Toggle(isOn: Binding(
-          get: { isLoginItemEnabled },
-          set: { newValue in
-            updateLoginItem(enabled: newValue)
-          }
-        )) {
-          InfoLabel(title: "Launch VoxNotch at login", tooltip: "Automatically start VoxNotch when you log into your Mac.")
-        }
-        .onChange(of: settings.launchAtLogin) { _, newValue in
-          if newValue != isLoginItemEnabled {
-            updateLoginItem(enabled: newValue)
-          }
-        }
-
-        if let error = loginItemError {
-          Text(error)
-            .font(InterfaceScale.Typography.caption)
-            .foregroundStyle(.red)
-        }
-      } header: {
-        Text("Startup")
-          .settingsSectionHeading()
-      } footer: {
-        Text("VoxNotch runs in the menu bar and is always ready when you need it.")
           .settingsSectionNote()
       }
 
@@ -141,24 +151,31 @@ struct GeneralTab: View {
     }
     .settingsFormLayout()
     .onAppear {
-      settings.launchAtLogin = isLoginItemEnabled
+      refreshLoginItemStatus()
       modelManager.refreshAllModelStates()
       mlxModelManager.refreshAllModelStates()
     }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      refreshLoginItemStatus()
+    }
+  }
+
+  private func refreshLoginItemStatus() {
+    loginItemStatus = SMAppService.mainApp.status
+    settings.launchAtLogin = isLoginItemEnabled
   }
 
   private func updateLoginItem(enabled: Bool) {
     loginItemError = nil
+    defer { refreshLoginItemStatus() }
     do {
       if enabled {
         try SMAppService.mainApp.register()
       } else {
         try SMAppService.mainApp.unregister()
       }
-      settings.launchAtLogin = enabled
     } catch {
       loginItemError = "Failed to update login item: \(error.localizedDescription)"
-      settings.launchAtLogin = isLoginItemEnabled
     }
   }
 }

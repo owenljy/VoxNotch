@@ -8,6 +8,7 @@
 - Remove the Hugging Face import entry point; preserve management of existing imports.
 - Correct custom model availability and shared-cache deletion behavior.
 - Unify typography, section spacing, and multiline text layout across settings and history.
+- Improve launch-at-login settings with system approval guidance and status refresh.
 - Add pull-request tests, a shared Xcode scheme, release version checks, and DMG checksums.
 
 Build number: 4.
