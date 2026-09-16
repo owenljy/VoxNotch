@@ -18,12 +18,18 @@ protocol TranscriptionProvider: AnyObject, Sendable {
   /// Whether the provider is ready to transcribe
   var isReady: Bool { get async }
 
+  func unloadModel()
+
   /// Transcribe audio file to text
   /// - Parameters:
   ///   - audioURL: URL to the audio file (WAV format)
   ///   - language: Optional language code (e.g., "en", "zh")
   /// - Returns: Transcription result
   func transcribe(audioURL: URL, language: String?) async throws -> TranscriptionResult
+}
+
+extension TranscriptionProvider {
+  func unloadModel() {}
 }
 
 // MARK: - Transcription Result
@@ -132,6 +138,13 @@ final class TranscriptionService: @unchecked Sendable {
   private let mlxModelManager = MLXAudioModelManager.shared
 
   /// Primary transcription provider (FluidAudio or MLXAudio)
+  #if canImport(MLXAudioSTT)
+  private var recordingSession: RecordingTranscriptionSession?
+  #endif
+  private var recordingLease: UUID?
+  private var activeOperations = 0
+  private var lastUsed = Date()
+
   private var primaryProvider: TranscriptionProvider?
 
   /// Lock protecting primaryProvider during reconfigure/transcribe
@@ -191,6 +204,7 @@ final class TranscriptionService: @unchecked Sendable {
 
   private init() {
     configureProviders()
+    ModelMemoryManager.shared.start { [weak self] seconds in self?.unloadIfIdle(idleFor: seconds) }
   }
 
   // MARK: - Configuration
@@ -233,6 +247,93 @@ final class TranscriptionService: @unchecked Sendable {
 
   // MARK: - Public Methods
 
+  /// Keep models alive during recording/loading/inference; release both owners when idle.
+  private func beginOperation() {
+    providerLock.withLock { activeOperations += 1; lastUsed = Date() }
+  }
+  private func endOperation() {
+    providerLock.withLock { activeOperations -= 1; lastUsed = Date() }
+  }
+
+  func unloadIfIdle(idleFor seconds: TimeInterval = 300) {
+    providerLock.lock()
+    guard recordingLease == nil, activeOperations == 0, !isDownloadingModel, Date().timeIntervalSince(lastUsed) >= seconds else {
+      providerLock.unlock()
+      return
+    }
+    primaryProvider?.unloadModel()
+    mlxModelManager.unloadModel()
+    fluidModelManager.unloadModels()
+    providerLock.unlock()
+  }
+
+  func beginStreaming() -> (@Sendable ([Float]) -> Void)? {
+    cancelStreaming()
+    providerLock.withLock { recordingLease = UUID(); lastUsed = Date() }
+    #if canImport(MLXAudioSTT)
+    guard SpeechModel.resolve(settings.speechModel).builtin == .voxtralMini else { return nil }
+    let language = settings.transcriptionLanguage == "auto" ? nil : settings.transcriptionLanguage
+    let session = RecordingTranscriptionSession(language: language) { [self] in
+      try await ensureModelReady()
+      return try await MainActor.run {
+        guard let model = mlxModelManager.getLoadedModel() else { throw TranscriptionError.modelNotLoaded }
+        return ASRModelHandle(model: model)
+      }
+    }
+    providerLock.withLock { recordingSession = session }
+    return { samples in session.append(samples) }
+    #else
+    return nil
+    #endif
+  }
+
+  func cancelStreaming() {
+    providerLock.withLock {
+      recordingLease = nil
+      lastUsed = Date()
+      #if canImport(MLXAudioSTT)
+      recordingSession?.cancel()
+      recordingSession = nil
+      #endif
+    }
+  }
+
+  func finishStreaming(audioURL: URL, language: String?) async throws -> TranscriptionResult {
+    beginOperation()
+    let lease = providerLock.withLock { recordingLease }
+    defer {
+      endOperation()
+      providerLock.withLock { if recordingLease == lease { recordingLease = nil } }
+    }
+    #if canImport(MLXAudioSTT)
+    let session = providerLock.withLock { () -> RecordingTranscriptionSession? in
+      defer { recordingSession = nil }
+      return recordingSession
+    }
+    if let session {
+      do {
+        if settings.useVADSpeechGate, try await !VadGate.shared.containsSpeech(audioURL: audioURL) {
+          session.cancel()
+          throw TranscriptionError.noSpeechDetected
+        }
+        let result = try await session.finish()
+        guard !result.text.isEmpty else { throw TranscriptionError.noSpeechDetected }
+        return result
+      } catch is CancellationError {
+        session.cancel()
+        throw CancellationError()
+      } catch {
+        session.cancel()
+        try Task.checkCancellation()
+        // The WAV is retained throughout recording, so failed streaming is recoverable.
+        if case TranscriptionError.noSpeechDetected = error { throw error }
+        logger.warning("Recording-time inference failed; retrying complete audio: \(error)")
+      }
+    }
+    #endif
+    return try await transcribe(audioURL: audioURL, language: language)
+  }
+
   /// Set the primary transcription provider
   func setPrimaryProvider(_ provider: TranscriptionProvider) {
     providerLock.lock()
@@ -256,6 +357,9 @@ final class TranscriptionService: @unchecked Sendable {
   /// Check if the model is downloaded and load it if so.
   /// Does NOT auto-download - throws if model not available.
   func ensureModelReady() async throws {
+    beginOperation()
+    defer { endOperation() }
+    try Task.checkCancellation()
     let speechModelID = settings.speechModel
     let (builtinModel, customModel) = SpeechModel.resolve(speechModelID)
 
@@ -352,6 +456,9 @@ final class TranscriptionService: @unchecked Sendable {
   ///   - language: Optional language code (e.g., "en", "zh")
   /// - Returns: Transcription result
   func transcribe(audioURL: URL, language: String? = nil) async throws -> TranscriptionResult {
+    beginOperation()
+    defer { endOperation() }
+    try Task.checkCancellation()
     // Validate audio file before transcription
     try validateAudioFile(at: audioURL)
 

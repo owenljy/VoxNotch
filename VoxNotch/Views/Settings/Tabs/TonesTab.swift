@@ -47,7 +47,7 @@ struct TonesTab: View {
     Form {
       // MARK: — Preset Tones
       Section {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: InterfaceScale.Space.medium) {
           ForEach(builtInTones) { tone in
             TonePresetCard(
               tone: tone,
@@ -58,8 +58,10 @@ struct TonesTab: View {
         }
       } header: {
         Text("Tones")
+          .settingsSectionHeading()
       } footer: {
         Text("Tones use AI to refine your transcription \u{2014} fixing grammar, adjusting formality, or rewriting in a specific style. Choose \u{201C}None\u{201D} to get the raw transcription.")
+          .settingsSectionNote()
       }
 
       // MARK: — Custom Tones
@@ -67,9 +69,9 @@ struct TonesTab: View {
         // Custom tone list
         if customTones.isEmpty {
           Text("No custom tones yet. Create one to write your own prompt.")
-            .font(.callout)
+            .font(InterfaceScale.Typography.body)
             .foregroundStyle(.secondary)
-            .padding(.vertical, 4)
+            .padding(.vertical, InterfaceScale.Space.small)
         } else {
           ForEach(customTones) { tone in
             ToneRowView(
@@ -97,21 +99,21 @@ struct TonesTab: View {
           showNewToneSheet = true
         } label: {
           Label("Create Custom Tone", systemImage: "plus")
-            .font(.callout)
+            .font(InterfaceScale.Typography.body)
         }
         .buttonStyle(.borderless)
-        .padding(.top, 4)
+        .padding(.top, InterfaceScale.Space.small)
 
         // Selected custom tone editor
         if let tone = selectedCustomTone {
-          VStack(alignment: .leading, spacing: 10) {
+          VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
             Divider()
 
             // Name + action row
             HStack {
               TextField("Tone Name", text: $nameText)
                 .textFieldStyle(.plain)
-                .font(.headline)
+                .font(InterfaceScale.Typography.heading)
                 .onChange(of: nameText) { _, newVal in
                   var updated = tone
                   updated.displayName = newVal
@@ -128,7 +130,7 @@ struct TonesTab: View {
                 .controlSize(.small)
               } else {
                 Label("Active", systemImage: "checkmark.circle.fill")
-                  .font(.caption)
+                  .font(InterfaceScale.Typography.caption)
                   .foregroundStyle(.green)
               }
             }
@@ -148,7 +150,7 @@ struct TonesTab: View {
               }
 
             // Action buttons
-            HStack(spacing: 12) {
+            HStack(spacing: InterfaceScale.Space.large) {
               // Duplicate
               Button {
                 let copy = ToneTemplate(
@@ -164,7 +166,7 @@ struct TonesTab: View {
                 nameText = copy.displayName
               } label: {
                 Label("Duplicate", systemImage: "doc.on.doc")
-                  .font(.caption)
+                  .font(InterfaceScale.Typography.caption)
               }
               .buttonStyle(.borderless)
 
@@ -175,7 +177,7 @@ struct TonesTab: View {
                 showDeleteConfirm = true
               } label: {
                 Label("Delete", systemImage: "trash")
-                  .font(.caption)
+                  .font(InterfaceScale.Typography.caption)
               }
               .buttonStyle(.borderless)
               .confirmationDialog("Delete \"\(tone.displayName)\"?", isPresented: $showDeleteConfirm) {
@@ -193,14 +195,14 @@ struct TonesTab: View {
       } label: {
         HStack {
           Label("Custom Tones", systemImage: "slider.horizontal.3")
-            .font(.body)
+            .font(InterfaceScale.Typography.body)
           InfoIcon(tooltip: "Write your own AI prompt to control exactly how transcriptions are refined. Full Markdown supported.")
           if !customTones.isEmpty {
             Text("\(customTones.count)")
-              .font(.caption2)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 2)
+              .padding(.horizontal, InterfaceScale.Space.medium)
+              .padding(.vertical, InterfaceScale.Space.micro)
               .background(Color.secondary.opacity(0.1))
               .clipShape(Capsule())
           }
@@ -227,14 +229,14 @@ struct TonesTab: View {
             if AnyLanguageModelProvider.isAppleIntelligenceAvailable {
               Label("On-device, private, no API costs", systemImage: "checkmark.shield")
                 .foregroundStyle(.green)
-                .font(.caption)
+                .font(InterfaceScale.Typography.caption)
             } else {
               Label(
                 "Enable Apple Intelligence in System Settings \u{2192} Apple Intelligence & Siri",
                 systemImage: "exclamationmark.triangle"
               )
               .foregroundStyle(.orange)
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
             }
           }
 
@@ -242,7 +244,7 @@ struct TonesTab: View {
             TextField("Endpoint URL", text: $settings.llmEndpointURL)
               .textFieldStyle(.roundedBorder)
             Text("Default: http://localhost:11434")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
           }
 
@@ -275,38 +277,40 @@ struct TonesTab: View {
 
             if let result = connectionTestResult {
               Text(result)
-                .font(.caption)
+                .font(InterfaceScale.Typography.caption)
                 .foregroundStyle(result.contains("Success") ? .green : .red)
             }
           }
         } header: {
           Text("Provider")
+          .settingsSectionHeading()
         } footer: {
           Text("Apple Intelligence processes text on-device. Ollama requires running a local AI server.")
+          .settingsSectionNote()
         }
 
         // MARK: Ollama Model Management
         if settings.llmProvider == "local" {
           Section {
             if !llmModelManager.isOllamaReachable && !llmModelManager.isLoadingModels {
-              HStack(spacing: 8) {
+              HStack(spacing: InterfaceScale.Space.medium) {
                 Image(systemName: "exclamationmark.triangle")
                   .foregroundStyle(.orange)
                 Text("Cannot connect to Ollama server")
-                  .font(.caption)
+                  .font(InterfaceScale.Typography.caption)
                   .foregroundStyle(.secondary)
               }
 
               if let error = llmModelManager.lastError {
                 Text(error)
-                  .font(.caption)
+                  .font(InterfaceScale.Typography.caption)
                   .foregroundStyle(.red)
               }
 
               Button("Retry Connection") {
                 Task { await llmModelManager.refreshOllamaModels() }
               }
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
             }
 
             if llmModelManager.isLoadingModels {
@@ -314,7 +318,7 @@ struct TonesTab: View {
                 ProgressView()
                   .scaleEffect(0.7)
                 Text("Checking Ollama server...")
-                  .font(.caption)
+                  .font(InterfaceScale.Typography.caption)
                   .foregroundStyle(.secondary)
               }
             }
@@ -322,7 +326,7 @@ struct TonesTab: View {
             if llmModelManager.isOllamaReachable {
               Label("Connected to Ollama", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-                .font(.caption)
+                .font(InterfaceScale.Typography.caption)
             }
 
             ForEach(LLMModelManager.curatedModels) { model in
@@ -360,7 +364,7 @@ struct TonesTab: View {
                 Task { await llmModelManager.refreshOllamaModels() }
               } label: {
                 Image(systemName: "arrow.clockwise")
-                  .font(.caption)
+                  .font(InterfaceScale.Typography.caption)
               }
               .buttonStyle(.borderless)
             }
@@ -378,13 +382,13 @@ struct TonesTab: View {
         )
       } header: {
         Text("Quick-Switch (\u{2191}\u{2193})")
+          .settingsSectionHeading()
       } footer: {
         Text("Pin tones to quickly switch between them using hotkey + up/down arrow keys while recording.")
+          .settingsSectionNote()
       }
     }
-    .formStyle(.grouped)
-    .scrollIndicators(.never)
-    .padding()
+    .settingsFormLayout()
     .sheet(isPresented: $showNewToneSheet) {
       NewToneSheet(registry: registry) { name, prompt in
         let tone = ToneTemplate(

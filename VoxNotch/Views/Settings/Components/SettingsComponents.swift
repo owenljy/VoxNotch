@@ -35,7 +35,7 @@ struct InfoLabel: View {
   @State private var showPopover = false
 
   var body: some View {
-    HStack(spacing: 4) {
+    HStack(spacing: InterfaceScale.Space.small) {
       Text(title)
       Image(systemName: "info.circle")
         .font(.system(size: 11))
@@ -45,9 +45,9 @@ struct InfoLabel: View {
         }
         .popover(isPresented: $showPopover, arrowEdge: .trailing) {
           Text(tooltip)
-            .font(.callout)
+            .font(InterfaceScale.Typography.body)
             .foregroundStyle(.secondary)
-            .padding(10)
+            .padding(InterfaceScale.Space.medium)
             .frame(maxWidth: 260, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -70,9 +70,9 @@ struct InfoIcon: View {
       }
       .popover(isPresented: $showPopover, arrowEdge: .trailing) {
         Text(tooltip)
-          .font(.callout)
+          .font(InterfaceScale.Typography.body)
           .foregroundStyle(.secondary)
-          .padding(10)
+          .padding(InterfaceScale.Space.medium)
           .frame(maxWidth: 260, alignment: .leading)
           .fixedSize(horizontal: false, vertical: true)
       }
@@ -93,16 +93,16 @@ struct CustomModelCard: View {
   @State private var showDeleteConfirmation = false
 
   var body: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: InterfaceScale.Space.large) {
       // Selection indicator
       Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
         .foregroundStyle(isSelected ? Color.accentColor : .secondary)
 
-      VStack(alignment: .leading, spacing: 2) {
+      VStack(alignment: .leading, spacing: InterfaceScale.Space.micro) {
         Text(model.displayName)
           .fontWeight(isSelected ? .semibold : .medium)
         Text(model.hfRepoID)
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
           .foregroundStyle(.secondary)
           .lineLimit(1)
       }
@@ -116,16 +116,20 @@ struct CustomModelCard: View {
         showDeleteConfirmation = true
       } label: {
         Image(systemName: "trash")
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
       }
       .buttonStyle(.borderless)
+      .disabled({
+        if case .downloading = downloadState { return true }
+        return false
+      }())
       .confirmationDialog("Remove \(model.displayName)?", isPresented: $showDeleteConfirmation) {
         Button("Remove", role: .destructive) { onDelete() }
       } message: {
-        Text("This will remove the model from your list and delete downloaded files.")
+        Text("This removes the model from your list. Downloaded files shared with another model are kept.")
       }
     }
-    .padding(12)
+    .padding(InterfaceScale.Space.large)
     .background(
       RoundedRectangle(cornerRadius: 10)
         .fill(isSelected ? Color.accentColor.opacity(0.06) : Color(nsColor: .controlBackgroundColor))
@@ -153,25 +157,25 @@ struct CustomModelCard: View {
         .controlSize(.small)
 
     case .downloading(let progress, let downloadedBytes, let totalBytes, let speedBytesPerSecond):
-      VStack(alignment: .trailing, spacing: 2) {
-        HStack(spacing: 6) {
+      VStack(alignment: .trailing, spacing: InterfaceScale.Space.micro) {
+        HStack(spacing: InterfaceScale.Space.medium) {
           if progress > 0 {
             ProgressView(value: progress)
               .frame(width: 60)
             Text("\(Int(progress * 100))%")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
               .monospacedDigit()
           } else {
             ProgressView().scaleEffect(0.7)
             Text("Downloading...")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
           }
         }
         if totalBytes > 0 {
           Text("\(formatBytes(downloadedBytes)) / \(formatBytes(totalBytes)) \u{2022} \(formatSpeed(speedBytesPerSecond))")
-            .font(.caption2)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.tertiary)
             .monospacedDigit()
         }
@@ -180,24 +184,24 @@ struct CustomModelCard: View {
     case .ready:
       if isSelected {
         Label("Now Using", systemImage: "checkmark")
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
           .fontWeight(.medium)
           .foregroundStyle(.green)
       } else {
-        HStack(spacing: 4) {
+        HStack(spacing: InterfaceScale.Space.small) {
           Image(systemName: "checkmark.circle.fill")
             .foregroundStyle(.green)
           Text("Ready")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.green)
         }
       }
 
     case .failed:
-      HStack(spacing: 6) {
+      HStack(spacing: InterfaceScale.Space.medium) {
         Image(systemName: "exclamationmark.triangle.fill")
           .foregroundStyle(.red)
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
         Button("Retry") { onDownload() }
           .controlSize(.small)
       }
@@ -218,9 +222,9 @@ struct ModelCard: View {
   @State private var isHovered = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
       // Top row: icon + name + badge
-      HStack(alignment: .center, spacing: 10) {
+      HStack(alignment: .center, spacing: InterfaceScale.Space.medium) {
         // Provider icon
         ZStack {
           RoundedRectangle(cornerRadius: 7)
@@ -233,7 +237,7 @@ struct ModelCard: View {
 
         // Model name
         Text(model.displayName)
-          .font(.system(.body, design: .default, weight: .semibold))
+          .font(InterfaceScale.Typography.heading)
 
         // Tagline badge
         ModelBadge(text: model.tagline, model: model)
@@ -243,32 +247,43 @@ struct ModelCard: View {
 
       // Description
       Text(model.modelDescription)
-        .font(.callout)
+        .font(InterfaceScale.Typography.body)
         .foregroundStyle(.secondary)
-        .lineLimit(2)
         .fixedSize(horizontal: false, vertical: true)
 
       // Feature row
-      HStack(spacing: 8) {
+      HStack(spacing: InterfaceScale.Space.medium) {
         // Accuracy dots
-        HStack(spacing: 3) {
-          RatingDots(rating: model.accuracyRating, icon: "target")
+        HStack(spacing: InterfaceScale.Space.small) {
+          if let rating = model.accuracyRating {
+            RatingDots(rating: rating, icon: "target")
+          } else {
+            Text("Unrated")
+              .font(InterfaceScale.Typography.caption)
+              .foregroundStyle(.secondary)
+          }
           Text("Accuracy")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.secondary)
         }
 
-        Text("\u{00B7}").foregroundStyle(.tertiary).font(.caption)
+        Text("\u{00B7}").foregroundStyle(.tertiary).font(InterfaceScale.Typography.caption)
 
         // Speed dots
-        HStack(spacing: 3) {
-          RatingDots(rating: model.speedRating, icon: "bolt.fill")
+        HStack(spacing: InterfaceScale.Space.small) {
+          if let rating = model.speedRating {
+            RatingDots(rating: rating, icon: "bolt.fill")
+          } else {
+            Text("Unrated")
+              .font(InterfaceScale.Typography.caption)
+              .foregroundStyle(.secondary)
+          }
           Text("Speed")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.secondary)
         }
 
-        Text("\u{00B7}").foregroundStyle(.tertiary).font(.caption)
+        Text("\u{00B7}").foregroundStyle(.tertiary).font(InterfaceScale.Typography.caption)
 
         // Size pill
         FeaturePill(icon: "internaldrive", text: formatSize(model.estimatedSizeMB))
@@ -285,7 +300,7 @@ struct ModelCard: View {
         actionView
       }
     }
-    .padding(14)
+    .padding(InterfaceScale.Space.large)
     .background(
       RoundedRectangle(cornerRadius: 10)
         .fill(isSelected ? Color.accentColor.opacity(0.06) : Color(nsColor: .controlBackgroundColor))
@@ -313,25 +328,25 @@ struct ModelCard: View {
         .controlSize(.small)
 
     case .downloading(let progress, let downloadedBytes, let totalBytes, let speedBytesPerSecond):
-      VStack(alignment: .trailing, spacing: 2) {
-        HStack(spacing: 6) {
+      VStack(alignment: .trailing, spacing: InterfaceScale.Space.micro) {
+        HStack(spacing: InterfaceScale.Space.medium) {
           if progress > 0 {
             ProgressView(value: progress)
               .frame(width: 60)
             Text("\(Int(progress * 100))%")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
               .monospacedDigit()
           } else {
             ProgressView().scaleEffect(0.7)
             Text("Downloading\u{2026}")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
           }
         }
         if totalBytes > 0 {
           Text("\(formatBytes(downloadedBytes)) / \(formatBytes(totalBytes)) \u{2022} \(formatSpeed(speedBytesPerSecond))")
-            .font(.caption2)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.tertiary)
             .monospacedDigit()
         }
@@ -340,16 +355,16 @@ struct ModelCard: View {
     case .ready:
       if isSelected {
         Label("Now Using", systemImage: "checkmark")
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
           .fontWeight(.medium)
           .foregroundStyle(.green)
       }
 
     case .failed:
-      HStack(spacing: 6) {
+      HStack(spacing: InterfaceScale.Space.medium) {
         Image(systemName: "exclamationmark.triangle.fill")
           .foregroundStyle(.red)
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
         Button("Retry") { onDownload() }
           .controlSize(.small)
       }
@@ -369,7 +384,7 @@ struct RatingDots: View {
   private let total = 5
 
   var body: some View {
-    HStack(spacing: 2) {
+    HStack(spacing: InterfaceScale.Space.micro) {
       ForEach(0..<total, id: \.self) { i in
         Circle()
           .fill(i < rating ? Color.accentColor : Color(nsColor: .tertiaryLabelColor))
@@ -386,12 +401,12 @@ struct FeaturePill: View {
   let text: String
 
   var body: some View {
-    HStack(spacing: 3) {
+    HStack(spacing: InterfaceScale.Space.small) {
       Image(systemName: icon)
         .font(.system(size: 9))
         .foregroundStyle(.secondary)
       Text(text)
-        .font(.caption)
+        .font(InterfaceScale.Typography.caption)
         .foregroundStyle(.secondary)
     }
   }
@@ -406,18 +421,18 @@ struct ModelBadge: View {
   private var badgeColor: Color {
     switch model {
     case .glmAsrNano: .orange
-    case .qwen3Asr: .purple
+    case .qwen3Asr, .qwen3AsrSmall, .qwen3AsrQuantized: .purple
     default: .accentColor
     }
   }
 
   var body: some View {
     Text(text)
-      .font(.caption2)
+      .font(InterfaceScale.Typography.caption)
       .fontWeight(.semibold)
       .foregroundStyle(badgeColor)
       .padding(.horizontal, 7)
-      .padding(.vertical, 3)
+      .padding(.vertical, InterfaceScale.Space.small)
       .background(
         Capsule().fill(badgeColor.opacity(0.12))
       )
@@ -434,10 +449,10 @@ struct TonePresetCard: View {
 
   var body: some View {
     Button(action: onActivate) {
-      VStack(alignment: .leading, spacing: 6) {
+      VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
         HStack {
           Text(tone.displayName)
-            .font(.headline)
+            .font(InterfaceScale.Typography.heading)
             .foregroundStyle(isActive ? .white : .primary)
 
           Spacer()
@@ -450,12 +465,12 @@ struct TonePresetCard: View {
 
         if !tone.description.isEmpty {
           Text(tone.description)
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(isActive ? .white.opacity(0.85) : .secondary)
             .lineLimit(2)
         }
       }
-      .padding(12)
+      .padding(InterfaceScale.Space.large)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(
         RoundedRectangle(cornerRadius: 10)
@@ -485,14 +500,14 @@ struct QuickSwitchOrderedList: View {
   @State private var showAddPopover = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
       if fixedFirstItem != nil || !pinnedIDs.isEmpty {
         List {
           if let fixed = fixedFirstItem {
-            HStack(spacing: 10) {
+            HStack(spacing: InterfaceScale.Space.medium) {
               // Number badge
               Text("1")
-                .font(.caption.monospacedDigit())
+                .font(InterfaceScale.Typography.caption.monospacedDigit())
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
                 .frame(width: 20, height: 20)
@@ -500,7 +515,7 @@ struct QuickSwitchOrderedList: View {
                 .clipShape(Circle())
 
               Text(fixed.name)
-                .font(.body)
+                .font(InterfaceScale.Typography.body)
 
               Spacer()
 
@@ -508,15 +523,15 @@ struct QuickSwitchOrderedList: View {
                 .foregroundStyle(.tertiary)
                 .imageScale(.small)
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, InterfaceScale.Space.micro)
             .moveDisabled(true)
           }
 
           ForEach(Array(zip(pinnedIDs.indices, pinnedIDs)), id: \.1) { index, id in
-            HStack(spacing: 10) {
+            HStack(spacing: InterfaceScale.Space.medium) {
               // Number badge
               Text("\(index + (fixedFirstItem != nil ? 2 : 1))")
-                .font(.caption.monospacedDigit())
+                .font(InterfaceScale.Typography.caption.monospacedDigit())
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
                 .frame(width: 20, height: 20)
@@ -524,7 +539,7 @@ struct QuickSwitchOrderedList: View {
                 .clipShape(Circle())
 
               Text(name(for: id))
-                .font(.body)
+                .font(InterfaceScale.Typography.body)
 
               Spacer()
 
@@ -537,7 +552,7 @@ struct QuickSwitchOrderedList: View {
               }
               .buttonStyle(.plain)
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, InterfaceScale.Space.micro)
           }
           .onMove { from, to in pinnedIDs.move(fromOffsets: from, toOffset: to) }
         }
@@ -552,11 +567,11 @@ struct QuickSwitchOrderedList: View {
           showAddPopover = true
         } label: {
           Label("Add", systemImage: "plus.circle")
-            .font(.callout)
+            .font(InterfaceScale.Typography.body)
             .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
-        .padding(.leading, 2)
+        .padding(.leading, InterfaceScale.Space.micro)
         .popover(isPresented: $showAddPopover, arrowEdge: .bottom) {
           addPicker
         }
@@ -572,7 +587,7 @@ struct QuickSwitchOrderedList: View {
       if unpinned.isEmpty {
         Text("All items are pinned")
           .foregroundStyle(.secondary)
-          .font(.callout)
+          .font(InterfaceScale.Typography.body)
           .padding()
       } else {
         ForEach(unpinned, id: \.id) { item in
@@ -584,8 +599,8 @@ struct QuickSwitchOrderedList: View {
           } label: {
             Text(item.name)
               .frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 8)
+              .padding(.horizontal, InterfaceScale.Space.large)
+              .padding(.vertical, InterfaceScale.Space.medium)
               .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
@@ -596,7 +611,7 @@ struct QuickSwitchOrderedList: View {
       }
     }
     .frame(minWidth: 200)
-    .padding(.vertical, 4)
+    .padding(.vertical, InterfaceScale.Space.small)
   }
 
   private func name(for id: String) -> String {
@@ -618,7 +633,7 @@ struct ToneRowView: View {
   @State private var showDeleteConfirm = false
 
   var body: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: InterfaceScale.Space.medium) {
       // Active indicator
       Button(action: onActivate) {
         Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
@@ -629,7 +644,7 @@ struct ToneRowView: View {
 
       // Name
       Text(tone.displayName)
-        .font(.body)
+        .font(InterfaceScale.Typography.body)
         .fontWeight(isSelected ? .semibold : .regular)
 
       Spacer()
@@ -637,10 +652,10 @@ struct ToneRowView: View {
       // Badge
       if tone.isBuiltIn && tone.id != "none" {
         Text("built-in")
-          .font(.caption2)
+          .font(InterfaceScale.Typography.caption)
           .foregroundStyle(.secondary)
-          .padding(.horizontal, 6)
-          .padding(.vertical, 2)
+          .padding(.horizontal, InterfaceScale.Space.medium)
+          .padding(.vertical, InterfaceScale.Space.micro)
           .background(Color.secondary.opacity(0.1))
           .clipShape(Capsule())
       }
@@ -660,7 +675,7 @@ struct ToneRowView: View {
         }
       }
     }
-    .padding(.vertical, 2)
+    .padding(.vertical, InterfaceScale.Space.micro)
     .contentShape(Rectangle())
     .background(
       RoundedRectangle(cornerRadius: 6)
@@ -692,12 +707,12 @@ struct NewToneSheet: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
+    VStack(alignment: .leading, spacing: InterfaceScale.Space.large) {
       Text("New Tone")
-        .font(.title2)
+        .font(InterfaceScale.Typography.title)
         .fontWeight(.semibold)
 
-      HStack(spacing: 12) {
+      HStack(spacing: InterfaceScale.Space.large) {
         TextField("Name", text: $name)
           .textFieldStyle(.roundedBorder)
 
@@ -734,7 +749,7 @@ struct NewToneSheet: View {
         .keyboardShortcut(.return)
       }
     }
-    .padding(24)
+    .padding(InterfaceScale.Space.section)
     .frame(width: 520, height: 520)
   }
 }
@@ -753,11 +768,11 @@ struct ModelDownloadRow: View {
 
   var body: some View {
     HStack {
-      VStack(alignment: .leading, spacing: 2) {
+      VStack(alignment: .leading, spacing: InterfaceScale.Space.micro) {
         Text(title)
-          .font(.body)
+          .font(InterfaceScale.Typography.body)
         Text(description)
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
           .foregroundStyle(.secondary)
       }
 
@@ -765,19 +780,19 @@ struct ModelDownloadRow: View {
 
       statusView
     }
-    .padding(.vertical, 4)
+    .padding(.vertical, InterfaceScale.Space.small)
   }
 
   @ViewBuilder
   private var statusView: some View {
     switch state {
     case .ready, .downloaded:
-      HStack(spacing: 8) {
-        HStack(spacing: 4) {
+      HStack(spacing: InterfaceScale.Space.medium) {
+        HStack(spacing: InterfaceScale.Space.small) {
           Image(systemName: "checkmark.circle.fill")
             .foregroundStyle(.green)
           Text("Ready")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.green)
         }
 
@@ -785,7 +800,7 @@ struct ModelDownloadRow: View {
           showDeleteConfirmation = true
         } label: {
           Image(systemName: "trash")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
         }
         .buttonStyle(.borderless)
         .confirmationDialog("Delete \(title)?", isPresented: $showDeleteConfirmation) {
@@ -798,38 +813,38 @@ struct ModelDownloadRow: View {
       }
 
     case .downloading(let progress, let downloadedBytes, let totalBytes, let speedBytesPerSecond):
-      VStack(alignment: .trailing, spacing: 2) {
+      VStack(alignment: .trailing, spacing: InterfaceScale.Space.micro) {
         if progress > 0 {
-          HStack(spacing: 8) {
+          HStack(spacing: InterfaceScale.Space.medium) {
             ProgressView(value: progress)
               .frame(width: 60)
             Text("\(Int(progress * 100))%")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
               .monospacedDigit()
           }
         } else {
-          HStack(spacing: 4) {
+          HStack(spacing: InterfaceScale.Space.small) {
             ProgressView().scaleEffect(0.7)
             Text("Downloading...")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
           }
         }
         if totalBytes > 0 {
           Text("\(formatBytes(downloadedBytes)) / \(formatBytes(totalBytes)) \u{2022} \(formatSpeed(speedBytesPerSecond))")
-            .font(.caption2)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.tertiary)
             .monospacedDigit()
         }
       }
 
     case .loading:
-      HStack(spacing: 4) {
+      HStack(spacing: InterfaceScale.Space.small) {
         ProgressView()
           .scaleEffect(0.7)
         Text("Loading...")
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
           .foregroundStyle(.secondary)
       }
 
@@ -837,17 +852,17 @@ struct ModelDownloadRow: View {
       Button("Download") {
         onDownload()
       }
-      .font(.caption)
+      .font(InterfaceScale.Typography.caption)
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
 
     case .failed(let message):
-      HStack(spacing: 8) {
-        HStack(spacing: 4) {
+      HStack(spacing: InterfaceScale.Space.medium) {
+        HStack(spacing: InterfaceScale.Space.small) {
           Image(systemName: "exclamationmark.triangle.fill")
             .foregroundStyle(.red)
           Text("Failed")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.red)
         }
         .help(message)
@@ -855,7 +870,7 @@ struct ModelDownloadRow: View {
         Button("Retry") {
           onRetry()
         }
-        .font(.caption)
+        .font(InterfaceScale.Typography.caption)
         .controlSize(.small)
       }
     }
@@ -875,15 +890,15 @@ struct OllamaModelRow: View {
 
   var body: some View {
     HStack {
-      VStack(alignment: .leading, spacing: 2) {
+      VStack(alignment: .leading, spacing: InterfaceScale.Space.micro) {
         Text(model.displayName)
-          .font(.body)
-        HStack(spacing: 4) {
+          .font(InterfaceScale.Typography.body)
+        HStack(spacing: InterfaceScale.Space.small) {
           Text(model.estimatedSizeDescription)
           Text("\u{00B7}")
           Text(model.description)
         }
-        .font(.caption)
+        .font(InterfaceScale.Typography.caption)
         .foregroundStyle(.secondary)
       }
 
@@ -891,25 +906,25 @@ struct OllamaModelRow: View {
 
       statusView
     }
-    .padding(.vertical, 2)
+    .padding(.vertical, InterfaceScale.Space.micro)
   }
 
   @ViewBuilder
   private var statusView: some View {
     switch state {
     case .completed:
-      HStack(spacing: 8) {
+      HStack(spacing: InterfaceScale.Space.medium) {
         Button("Use") {
           onSelect()
         }
-        .font(.caption)
+        .font(InterfaceScale.Typography.caption)
         .controlSize(.small)
 
-        HStack(spacing: 4) {
+        HStack(spacing: InterfaceScale.Space.small) {
           Image(systemName: "checkmark.circle.fill")
             .foregroundStyle(.green)
           Text("Ready")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.green)
         }
 
@@ -917,7 +932,7 @@ struct OllamaModelRow: View {
           showDeleteConfirmation = true
         } label: {
           Image(systemName: "trash")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
         }
         .buttonStyle(.borderless)
         .confirmationDialog("Delete \(model.displayName)?", isPresented: $showDeleteConfirmation) {
@@ -928,11 +943,11 @@ struct OllamaModelRow: View {
       }
 
     case .pulling(let progress):
-      HStack(spacing: 8) {
+      HStack(spacing: InterfaceScale.Space.medium) {
         ProgressView(value: progress)
           .frame(width: 60)
         Text("\(Int(progress * 100))%")
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
           .foregroundStyle(.secondary)
           .monospacedDigit()
       }
@@ -941,17 +956,17 @@ struct OllamaModelRow: View {
       Button("Pull") {
         onPull()
       }
-      .font(.caption)
+      .font(InterfaceScale.Typography.caption)
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
 
     case .failed(let message):
-      HStack(spacing: 8) {
-        HStack(spacing: 4) {
+      HStack(spacing: InterfaceScale.Space.medium) {
+        HStack(spacing: InterfaceScale.Space.small) {
           Image(systemName: "exclamationmark.triangle.fill")
             .foregroundStyle(.red)
           Text("Failed")
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.red)
         }
         .help(message)
@@ -959,7 +974,7 @@ struct OllamaModelRow: View {
         Button("Retry") {
           onPull()
         }
-        .font(.caption)
+        .font(InterfaceScale.Typography.caption)
         .controlSize(.small)
       }
     }

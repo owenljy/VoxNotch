@@ -307,7 +307,7 @@ final class QuickDictationController {
             isModelDownloaded = builtin.isDownloaded
             modelDisplayName = builtin.displayName
         } else if let custom = customModel {
-            isModelDownloaded = custom.isDownloaded
+            isModelDownloaded = MLXAudioModelManager.shared.isCustomModelOnDisk(custom)
             modelDisplayName = custom.displayName
         } else {
             isModelDownloaded = false

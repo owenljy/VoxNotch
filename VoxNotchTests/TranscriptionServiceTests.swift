@@ -12,6 +12,9 @@ final class SpyTranscriptionProvider: TranscriptionProvider, @unchecked Sendable
   var isReady: Bool { get async { isReadyValue } }
 
   var isReadyValue = true
+  var unloadCallCount = 0
+  var onTranscribe: (() async -> Void)?
+  func unloadModel() { unloadCallCount += 1 }
   var transcribeCallCount = 0
   var lastAudioURL: URL?
   var lastLanguage: String?
@@ -26,6 +29,7 @@ final class SpyTranscriptionProvider: TranscriptionProvider, @unchecked Sendable
     transcribeCallCount += 1
     lastAudioURL = audioURL
     lastLanguage = language
+    await onTranscribe?()
     if let error = stubbedError { throw error }
     return stubbedResult ?? TranscriptionResult(
       text: "test transcription",
@@ -41,6 +45,36 @@ final class SpyTranscriptionProvider: TranscriptionProvider, @unchecked Sendable
 
 @MainActor
 final class TranscriptionServiceTests: XCTestCase {
+
+  func testMemoryPressureKeepsActiveInferenceAndReleasesIdleProvider() async throws {
+    let service = TranscriptionService.shared
+    service.cancelStreaming()
+    let spy = SpyTranscriptionProvider()
+    service.setPrimaryProvider(spy)
+    defer { service.reconfigure() }
+    let entered = expectation(description: "inference entered")
+    var resume: CheckedContinuation<Void, Never>?
+    spy.onTranscribe = {
+      await withCheckedContinuation { continuation in
+        resume = continuation
+        entered.fulfill()
+      }
+    }
+    let wav = createMinimalWAV()
+    defer { try? FileManager.default.removeItem(at: wav) }
+    let task = Task { try await service.transcribe(audioURL: wav) }
+    await fulfillment(of: [entered], timeout: 2)
+    // Real memory-pressure notifications may have evicted this idle spy before
+    // inference began; assert changes only within the phase under test.
+    let activeBaseline = spy.unloadCallCount
+    service.unloadIfIdle(idleFor: 0)
+    XCTAssertEqual(spy.unloadCallCount, activeBaseline)
+    resume?.resume()
+    _ = try await task.value
+    let idleBaseline = spy.unloadCallCount
+    service.unloadIfIdle(idleFor: 0)
+    XCTAssertEqual(spy.unloadCallCount, idleBaseline + 1)
+  }
 
   // MARK: - Provider Routing
 

@@ -80,6 +80,8 @@ final class DictationStateMachine {
 
     // MARK: - Timers
 
+    private var pipelineTask: Task<Void, Never>?
+
     private var watchdogTimer: ClockTimer?
     private var durationTimer: ClockTimer?
 
@@ -236,6 +238,10 @@ final class DictationStateMachine {
     /// Invalidate the current session (cancel in-flight work).
     @discardableResult
     func invalidateSession() -> UUID {
+        pipelineTask?.cancel()
+        pipelineTask = nil
+        transcriptionEngine.cancelStreaming()
+        audioManager.onResampledAudioSamples = nil
         let newID = UUID()
         currentSessionID = newID
         return newID
@@ -243,7 +249,7 @@ final class DictationStateMachine {
 
     /// Check whether a captured session ID still matches the current session.
     func isSessionValid(_ sessionID: UUID) -> Bool {
-        return sessionID == currentSessionID
+        return sessionID == currentSessionID && !Task.isCancelled
     }
 
     // MARK: - Pipeline: Begin Recording
@@ -253,15 +259,25 @@ final class DictationStateMachine {
     /// The selected manager is retained for the duration of the session so that
     /// stop/cancel/cleanup all target the same source.
     func beginRecording(audioSource: AudioSource = .microphone) async throws {
+        invalidateSession()
         let manager: AudioRecording = (audioSource == .systemAudio) ? systemAudioManager : micAudioManager
         audioManager = manager
+        textOutputManager.captureTarget()
 
         transition(to: .recording)
         recordingStartTime = clock.now()
         startDurationTimer()
 
+        let sink = transcriptionEngine.beginStreaming()
+        manager.onResampledAudioSamples = sink
         manager.accumulateBuffers = true
-        try await manager.startRecording()
+        do {
+            try await manager.startRecording()
+        } catch {
+            transcriptionEngine.cancelStreaming()
+            manager.onResampledAudioSamples = nil
+            throw error
+        }
         transcriptionEngine.preloadModel()
     }
 
@@ -284,6 +300,8 @@ final class DictationStateMachine {
         do {
             captureResult = try audioManager.stopRecording()
         } catch {
+            transcriptionEngine.cancelStreaming()
+            audioManager.onResampledAudioSamples = nil
             audioManager.cancelRecording()
             transition(to: .error(error))
             return
@@ -291,17 +309,20 @@ final class DictationStateMachine {
 
         let capturedSessionID = currentSessionID
 
-        Task {
+        let recordingManager = audioManager
+        recordingManager.onResampledAudioSamples = nil
+        pipelineTask = Task {
             var shouldCleanupAudio = true
             defer {
                 if shouldCleanupAudio {
-                    audioManager.cleanupFile(at: captureResult.fileURL)
+                    recordingManager.cleanupFile(at: captureResult.fileURL)
                 }
             }
 
             do {
                 // Check model ready → warmingUp or transcribing
                 let isReady = await transcriptionEngine.isReady
+                guard isSessionValid(capturedSessionID) else { return }
                 await MainActor.run {
                     transition(to: isReady ? .transcribing : .warmingUp)
                 }
@@ -314,7 +335,7 @@ final class DictationStateMachine {
                 }
 
                 // Transcribe
-                let result = try await transcriptionEngine.transcribe(audioURL: captureResult.fileURL, language: nil)
+                let result = try await transcriptionEngine.finishStreaming(audioURL: captureResult.fileURL, language: nil)
                 guard isSessionValid(capturedSessionID) else { return }
 
                 // Post-process text
@@ -351,6 +372,7 @@ final class DictationStateMachine {
                         return Self.detectLanguage(of: text)
                     }()
                     let llmResult = await llmProcessor.processWithResult(text: text, language: effectiveLanguage)
+                    guard isSessionValid(capturedSessionID) else { return }
                     finalText = llmResult.text
                     if case .fallback(_, let error) = llmResult {
                         await MainActor.run { onLLMWarning?(error.localizedDescription) }
@@ -358,6 +380,8 @@ final class DictationStateMachine {
                 } else {
                     finalText = text
                 }
+
+                guard isSessionValid(capturedSessionID) else { return }
 
                 // History save (non-blocking)
                 saveToHistory(
@@ -369,10 +393,11 @@ final class DictationStateMachine {
                 )
 
                 // Output text
-                await outputText(finalText, savedFrontmostApp: savedFrontmostApp)
+                await outputText(finalText, savedFrontmostApp: savedFrontmostApp, sessionID: capturedSessionID)
 
             } catch {
                 guard isSessionValid(capturedSessionID) else { return }
+                transcriptionEngine.cancelStreaming()
                 shouldCleanupAudio = false
                 await MainActor.run {
                     onPipelineErrorWithAudio?(captureResult.fileURL)
@@ -390,8 +415,9 @@ final class DictationStateMachine {
 
         let capturedSessionID = currentSessionID
 
-        Task {
+        pipelineTask = Task {
             do {
+                guard isSessionValid(capturedSessionID) else { return }
                 await MainActor.run { transition(to: .warmingUp) }
                 try await transcriptionEngine.ensureModelReady()
                 guard isSessionValid(capturedSessionID) else { return }
@@ -407,7 +433,7 @@ final class DictationStateMachine {
                 }
 
                 audioManager.cleanupFile(at: audioURL)
-                await outputText(text, savedFrontmostApp: savedFrontmostApp)
+                await outputText(text, savedFrontmostApp: savedFrontmostApp, sessionID: capturedSessionID)
 
             } catch {
                 guard isSessionValid(capturedSessionID) else { return }
@@ -418,29 +444,41 @@ final class DictationStateMachine {
 
     // MARK: - Pipeline: Output Text
 
-    private func outputText(_ text: String, savedFrontmostApp: NSRunningApplication?) async {
-        // Re-verify: if user switched apps during transcription, target the current one.
-        let effectiveApp: NSRunningApplication?
-        if let saved = savedFrontmostApp,
-           saved.processIdentifier == NSWorkspace.shared.frontmostApplication?.processIdentifier {
-            effectiveApp = saved
-        } else {
-            effectiveApp = NSWorkspace.shared.frontmostApplication
+    private func outputText(_ text: String, savedFrontmostApp: NSRunningApplication?, sessionID: UUID) async {
+        guard isSessionValid(sessionID) else { return }
+        // Never redirect a completed recording into a different application.
+        if !textOutputManager.isTargetCurrent(savedFrontmostApp) {
+            transition(to: .outputting)
+            textOutputManager.copyToClipboardOnly(text)
+            onPipelineOutputSuccess?(.clipboardAborted)
+            transition(to: .idle)
+            return
         }
+        let effectiveApp = savedFrontmostApp
 
         let hasFocusedInput = textOutputManager.hasFocusedTextInput(for: effectiveApp)
 
         await MainActor.run { transition(to: .outputting) }
 
+        guard isSessionValid(sessionID) else { return }
+        if !textOutputManager.isTargetCurrent(savedFrontmostApp) {
+            textOutputManager.copyToClipboardOnly(text)
+            onPipelineOutputSuccess?(.clipboardAborted)
+            transition(to: .idle)
+            return
+        }
         if hasFocusedInput {
             do {
                 try await textOutputManager.output(text)
-                textOutputManager.copyToClipboardOnly(text)
+                guard isSessionValid(sessionID) else { return }
                 await MainActor.run {
                     onPipelineOutputSuccess?(.inserted)
                     transition(to: .idle)
                 }
+            } catch is CancellationError {
+                return
             } catch let error as TextOutputManager.TextOutputError where error == .targetAppChanged {
+                guard isSessionValid(sessionID) else { return }
                 // App switched mid-keystroke — fall back to clipboard gracefully.
                 textOutputManager.copyToClipboardOnly(text)
                 await MainActor.run {
@@ -448,6 +486,7 @@ final class DictationStateMachine {
                     transition(to: .idle)
                 }
             } catch {
+                guard isSessionValid(sessionID) else { return }
                 await MainActor.run { transition(to: .error(error)) }
             }
         } else {

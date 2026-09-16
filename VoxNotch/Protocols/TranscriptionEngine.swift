@@ -13,7 +13,19 @@ protocol TranscriptionEngine: AnyObject, Sendable {
     func preloadModel()
     func ensureModelReady() async throws
     func transcribe(audioURL: URL, language: String?) async throws -> TranscriptionResult
+    func beginStreaming() -> (@Sendable ([Float]) -> Void)?
+    func finishStreaming(audioURL: URL, language: String?) async throws -> TranscriptionResult
+    func cancelStreaming()
     func reconfigure()
 }
 
 extension TranscriptionService: TranscriptionEngine {}
+
+
+extension TranscriptionEngine {
+    func beginStreaming() -> (@Sendable ([Float]) -> Void)? { nil }
+    func finishStreaming(audioURL: URL, language: String?) async throws -> TranscriptionResult {
+        try await transcribe(audioURL: audioURL, language: language)
+    }
+    func cancelStreaming() {}
+}

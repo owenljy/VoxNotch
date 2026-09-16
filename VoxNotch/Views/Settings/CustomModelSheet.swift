@@ -143,37 +143,19 @@ struct CustomModelSheet: View {
     errorMessage = nil
 
     do {
-      // Attempt to load the model -- this validates it AND caches it via HF Hub.
-      // Try GLM first (most common); if that fails, config.json is now cached so
-      // inferLoaderClass can detect the real architecture and retry.
       #if canImport(MLXAudioSTT)
-      let validated: any STTGenerationModel
-      do {
-        validated = try await GLMASRModel.fromPretrained(trimmedID)
-      } catch {
-        let loaderClass = MLXAudioModelManager.shared.inferLoaderClass(hfRepoID: trimmedID)
-        switch loaderClass {
-        case .glmASR:          throw error
-        case .qwen3ASR:        validated = try await Qwen3ASRModel.fromPretrained(trimmedID)
-        case .voxtralRealtime: validated = try await VoxtralRealtimeModel.fromPretrained(trimmedID)
-        case .parakeet:        validated = try await ParakeetModel.fromPretrained(trimmedID)
-        }
-      }
-
-      // Register and mark downloaded
+      // Reject unsupported architectures before downloading weights.
+      _ = try await MLXAudioModelManager.shared.inferLoaderClass(hfRepoID: trimmedID)
       let customModel = CustomModelRegistry.shared.add(repoID: trimmedID, displayName: name)
-      CustomModelRegistry.shared.markDownloaded(id: customModel.id)
-
-      // Store in manager so it's immediately usable without reloading
       do {
         try await MLXAudioModelManager.shared.downloadAndLoadCustom(model: customModel)
       } catch {
-        Logger(subsystem: "com.voxnotch", category: "CustomModelSheet")
-          .error("Failed to load custom model after registration: \(error)")
+        CustomModelRegistry.shared.remove(id: customModel.id)
+        throw error
       }
+      CustomModelRegistry.shared.markDownloaded(id: customModel.id)
 
       await MainActor.run {
-        _ = validated  // keep reference alive until here
         isValidating = false
         onAdd(customModel)
         dismiss()

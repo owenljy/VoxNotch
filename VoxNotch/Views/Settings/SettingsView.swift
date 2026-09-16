@@ -75,17 +75,18 @@ struct SettingsView: View {
         }
       }
       .listStyle(.sidebar)
+      .font(InterfaceScale.Typography.body)
       .frame(width: 200)
 
       Divider()
 
       VStack(alignment: .leading, spacing: 0) {
         Text(selectedPanel.title)
-          .font(.title2)
+          .font(InterfaceScale.Typography.title)
           .fontWeight(.semibold)
-          .padding(.horizontal, 24)
-          .padding(.top, 20)
-          .padding(.bottom, 4)
+          .padding(.horizontal, InterfaceScale.Space.section)
+          .padding(.top, InterfaceScale.Space.section)
+          .padding(.bottom, InterfaceScale.Space.medium)
 
         detailView
           .frame(maxWidth: .infinity, alignment: .leading)

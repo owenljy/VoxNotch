@@ -30,9 +30,6 @@ final class MLXAudioProvider: TranscriptionProvider, @unchecked Sendable {
   /// Lock for thread safety
   private let lock = NSLock()
 
-  /// Dedicated queue for inference — keeps the cooperative thread pool free for UI work.
-  private static let inferenceQueue = DispatchQueue(label: "com.voxnotch.mlx-inference", qos: .userInitiated)
-
   /// Whether the model is currently loaded
   private var isModelLoaded = false
 
@@ -63,22 +60,26 @@ final class MLXAudioProvider: TranscriptionProvider, @unchecked Sendable {
     /// Run audio loading and model inference on a dedicated GCD queue so the
     /// synchronous `model.generate()` call doesn't block Swift's cooperative
     /// thread pool, which would starve MainActor tasks and freeze the UI.
-    let (outputText, audioDuration) = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(String, Double), Error>) in
-      Self.inferenceQueue.async { [self] in
-        guard let model = self.lock.withLock({ self.model }) else {
-          continuation.resume(throwing: TranscriptionError.modelNotLoaded)
-          return
-        }
-        do {
-          let audioArray = try self.loadAudioAsMLXArray(from: audioURL)
-          let audioDuration = Double(audioArray.dim(0)) / 16000.0
-          let output = model.generate(audio: audioArray)
-          continuation.resume(returning: (output.text, audioDuration))
-        } catch {
-          continuation.resume(throwing: error)
-        }
+    if SettingsManager.shared.useVADSpeechGate {
+      guard try await VadGate.shared.containsSpeech(audioURL: audioURL) else {
+        throw TranscriptionError.noSpeechDetected
       }
     }
+    let cancellation = ASRCancellation()
+    let (outputText, detectedLanguage, audioDuration) = try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(String, String?, Double), Error>) in
+        ASRInference.queue.async { [self] in
+          do {
+            try cancellation.check()
+            guard let model = self.lock.withLock({ self.model }) else { throw TranscriptionError.modelNotLoaded }
+            let samples = try self.loadAudioSamples(from: audioURL)
+            let output = try ASRInference.generate(model: model, samples: samples, language: language, cancellation: cancellation)
+            continuation.resume(returning: (output.text, output.language, Double(samples.count) / 16000))
+          } catch { continuation.resume(throwing: error) }
+        }
+      }
+    } onCancel: { cancellation.cancel() }
+    try Task.checkCancellation()
 
     let processingTime = Date().timeIntervalSince(startTime)
 
@@ -94,7 +95,7 @@ final class MLXAudioProvider: TranscriptionProvider, @unchecked Sendable {
       audioDuration: audioDuration,
       processingTime: processingTime,
       provider: name,
-      language: language,
+      language: detectedLanguage,
       segments: nil
     )
     #else
@@ -110,10 +111,6 @@ final class MLXAudioProvider: TranscriptionProvider, @unchecked Sendable {
   /// Priority: (1) model already in manager memory, (2) custom model by loaderClass,
   /// (3) built-in model by loaderClass. All paths store the result in `self.model`.
   private func ensureModelLoaded() async throws {
-    let needsLoad = lock.withLock { model == nil }
-
-    guard needsLoad else { return }
-
     /// 1. Use a model already loaded by the manager (fastest path).
     if let existing = modelManager.getLoadedModel() {
       lock.withLock {
@@ -130,7 +127,7 @@ final class MLXAudioProvider: TranscriptionProvider, @unchecked Sendable {
 
     if let custom = customModel {
       logger.info("Loading custom MLX Audio model from HF cache: \(custom.hfRepoID)")
-      let loaderClass = modelManager.inferLoaderClass(hfRepoID: custom.hfRepoID)
+      let loaderClass = try await modelManager.inferLoaderClass(hfRepoID: custom.hfRepoID)
       let loaded: any STTGenerationModel
       switch loaderClass {
       case .glmASR:
@@ -197,7 +194,7 @@ final class MLXAudioProvider: TranscriptionProvider, @unchecked Sendable {
 
   #if canImport(MLXAudioSTT)
   /// Load audio file and convert to MLXArray at 16kHz mono
-  private func loadAudioAsMLXArray(from url: URL) throws -> MLXArray {
+  private func loadAudioSamples(from url: URL) throws -> [Float] {
     let audioFile = try AVAudioFile(forReading: url)
     let sourceFormat = audioFile.processingFormat
     let frameCount = AVAudioFrameCount(audioFile.length)
@@ -267,7 +264,7 @@ final class MLXAudioProvider: TranscriptionProvider, @unchecked Sendable {
     let samples = Int(outputBuffer.frameLength)
     let floatArray = Array(UnsafeBufferPointer(start: floatData[0], count: samples))
 
-    return MLXArray(floatArray)
+    return floatArray
   }
   #endif
 }

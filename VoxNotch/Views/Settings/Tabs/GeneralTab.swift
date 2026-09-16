@@ -35,8 +35,10 @@ struct GeneralTab: View {
         }
       } header: {
         Text("Setup")
+          .settingsSectionHeading()
       } footer: {
         Text("Re-run the first-time setup to configure permissions, download models, and review the tutorial.")
+          .settingsSectionNote()
       }
 
       // MARK: Startup
@@ -57,13 +59,15 @@ struct GeneralTab: View {
 
         if let error = loginItemError {
           Text(error)
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.red)
         }
       } header: {
         Text("Startup")
+          .settingsSectionHeading()
       } footer: {
         Text("VoxNotch runs in the menu bar and is always ready when you need it.")
+          .settingsSectionNote()
       }
 
       // MARK: Privacy
@@ -73,8 +77,10 @@ struct GeneralTab: View {
         }
       } header: {
         Text("Privacy")
+          .settingsSectionHeading()
       } footer: {
         Text("Prevents VoxNotch from appearing in screen shares and recordings.")
+          .settingsSectionNote()
       }
 
       // MARK: About
@@ -90,6 +96,7 @@ struct GeneralTab: View {
         }
       } header: {
         Text("About")
+          .settingsSectionHeading()
       }
 
       // MARK: Storage
@@ -126,13 +133,13 @@ struct GeneralTab: View {
         }
       } header: {
         Text("Storage")
+          .settingsSectionHeading()
       } footer: {
         Text("Includes all speech models for Quick Dictation.")
+          .settingsSectionNote()
       }
     }
-    .formStyle(.grouped)
-    .scrollIndicators(.never)
-    .padding()
+    .settingsFormLayout()
     .onAppear {
       settings.launchAtLogin = isLoginItemEnabled
       modelManager.refreshAllModelStates()

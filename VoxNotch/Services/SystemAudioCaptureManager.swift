@@ -111,7 +111,20 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
     var onAudioSamples: (([Float]) -> Void)?
 
     /// Callback for resampled 16kHz audio samples
-    var onResampledAudioSamples: (([Float]) -> Void)?
+    private let samplesCallbackLock = NSLock()
+    private var samplesCallback: (@Sendable ([Float]) -> Void)?
+    var onResampledAudioSamples: (@Sendable ([Float]) -> Void)? {
+        get {
+            samplesCallbackLock.lock()
+            defer { samplesCallbackLock.unlock() }
+            return samplesCallback
+        }
+        set {
+            samplesCallbackLock.lock()
+            samplesCallback = newValue
+            samplesCallbackLock.unlock()
+        }
+    }
 
     // MARK: - Audio Level Visualization
 
@@ -344,6 +357,10 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
         }
 
         recordedBuffers.append(resampledBuffer)
+
+        if let sink = self.onResampledAudioSamples {
+            sink(Array(UnsafeBufferPointer(start: outputChannelData[0], count: frameCount)))
+        }
 
         // Update audio level for visualization
         updateAudioLevel(buffer: resampledBuffer)

@@ -150,7 +150,7 @@ enum AnyModel: Identifiable, Hashable, Sendable {
   var isDownloaded: Bool {
     switch self {
     case .builtin(let m): m.isDownloaded
-    case .custom(let m): m.isDownloaded
+    case .custom(let m): MLXAudioModelManager.shared.isCustomModelOnDisk(m)
     }
   }
 

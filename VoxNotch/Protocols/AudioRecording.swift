@@ -17,6 +17,7 @@ import Foundation
 /// Permission management is intentionally NOT on this protocol — it differs by source
 /// (Microphone vs. Screen Recording) and is the caller's concern.
 protocol AudioRecording: AnyObject {
+    var onResampledAudioSamples: (@Sendable ([Float]) -> Void)? { get set }
     var isRecording: Bool { get }
     var accumulateBuffers: Bool { get set }
     var onSilenceWarning: (() -> Void)? { get set }

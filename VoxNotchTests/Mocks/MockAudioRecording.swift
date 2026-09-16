@@ -10,6 +10,7 @@ final class MockAudioRecording: AudioRecording {
     // Explicit init to resolve actor isolation ambiguity
     nonisolated init() {}
 
+    var onResampledAudioSamples: (@Sendable ([Float]) -> Void)?
     var isRecording: Bool = false
     var accumulateBuffers: Bool = false
     var onSilenceWarning: (() -> Void)?

@@ -16,7 +16,7 @@ struct SpeechModelTab: View {
   @State private var fluidModelManager = FluidAudioModelManager.shared
   @State private var mlxModelManager = MLXAudioModelManager.shared
   @State private var customRegistry = CustomModelRegistry.shared
-  @State private var showBrowseModels = false
+  @State private var modelError: String?
 
   private var selectedBuiltinModel: SpeechModel? {
     SpeechModel(rawValue: settings.speechModel)
@@ -31,9 +31,9 @@ struct SpeechModelTab: View {
       // Built-in Models
       Section {
         // Privacy badge
-        Label("On-device, private, no network required", systemImage: "checkmark.shield")
+        Label("On-device transcription after model download", systemImage: "checkmark.shield")
           .foregroundStyle(.green)
-          .font(.callout)
+          .font(InterfaceScale.Typography.body)
 
         ForEach(SpeechModel.allCases) { model in
           ModelCard(
@@ -46,17 +46,15 @@ struct SpeechModelTab: View {
         }
       } header: {
         Text("Built-in Models")
+          .settingsSectionHeading()
       } footer: {
-        Text("Speech-to-text models that run locally on your Mac. Larger models are more accurate but use more memory.")
+        Text("Speech-to-text models that run locally on your Mac. Model accuracy varies by language and audio; larger models use more memory.")
+          .settingsSectionNote()
       }
 
-      // Custom Models
-      Section {
-        if customRegistry.models.isEmpty {
-          Text("No custom models added yet.")
-            .foregroundStyle(.secondary)
-            .font(.callout)
-        } else {
+      // Keep existing imports manageable, but do not offer unsupported arbitrary imports.
+      if !customRegistry.models.isEmpty {
+        Section {
           ForEach(customRegistry.models) { model in
             CustomModelCard(
               model: model,
@@ -67,27 +65,13 @@ struct SpeechModelTab: View {
               onDelete: { deleteCustomModel(model) }
             )
           }
+        } header: {
+          Text("Previously Added Models")
+          .settingsSectionHeading()
+        } footer: {
+          Text("Existing imports can still be used or removed. New Hugging Face imports are unavailable; choose a built-in model above.")
+          .settingsSectionNote()
         }
-
-        Button {
-          showBrowseModels = true
-        } label: {
-          Label("Browse HuggingFace Models", systemImage: "safari")
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-        }
-        .buttonStyle(.borderless)
-        .overlay(
-          RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(
-              style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
-            )
-            .foregroundStyle(Color(nsColor: .separatorColor))
-        )
-      } header: {
-        Text("Custom Models")
-      } footer: {
-        Text("Import Whisper-compatible models from Hugging Face to use models not included by default.")
       }
 
       // Quick-Switch
@@ -99,23 +83,29 @@ struct SpeechModelTab: View {
         )
       } header: {
         Text("Quick-Switch (\u{2190} \u{2192})")
+          .settingsSectionHeading()
       } footer: {
         Text("Pin up to 3 models to quickly switch between them using hotkey + arrow keys.")
+          .settingsSectionNote()
       }
     }
-    .formStyle(.grouped)
-    .scrollIndicators(.never)
-    .padding()
+    .settingsFormLayout()
     .onAppear {
       fluidModelManager.refreshAllModelStates()
       mlxModelManager.refreshAllModelStates()
+      refreshModelsNeeded()
     }
     .onChange(of: settings.speechModel) { _, _ in
       TranscriptionService.shared.reconfigure()
       refreshModelsNeeded()
     }
-    .sheet(isPresented: $showBrowseModels) {
-      HFModelBrowserSheet()
+    .alert("Model operation failed", isPresented: Binding(
+      get: { modelError != nil },
+      set: { if !$0 { modelError = nil } }
+    )) {
+      Button("OK") { modelError = nil }
+    } message: {
+      Text(modelError ?? "")
     }
   }
 
@@ -167,7 +157,7 @@ struct SpeechModelTab: View {
         }
       } catch {
         settingsLogger.error("Model download failed: \(error.localizedDescription)")
-        // Model managers already update their state to .failed internally
+        modelError = error.localizedDescription
       }
     }
   }
@@ -178,7 +168,7 @@ struct SpeechModelTab: View {
     if let state = mlxModelManager.customModelStates[model.id] {
       return state.uiState
     }
-    return model.isDownloaded ? .ready : .notDownloaded
+    return mlxModelManager.isCustomModelOnDisk(model) ? .ready : .notDownloaded
   }
 
   private func downloadCustomModel(_ model: CustomSpeechModel) {
@@ -187,13 +177,19 @@ struct SpeechModelTab: View {
         try await mlxModelManager.downloadAndLoadCustom(model: model)
       } catch {
         settingsLogger.error("Custom model download failed (\(model.hfRepoID)): \(error.localizedDescription)")
+        modelError = error.localizedDescription
       }
       await MainActor.run { refreshModelsNeeded() }
     }
   }
 
   private func deleteCustomModel(_ model: CustomSpeechModel) {
-    mlxModelManager.deleteCustomModel(model)
+    do {
+      try mlxModelManager.deleteCustomModel(model)
+    } catch {
+      modelError = error.localizedDescription
+      return
+    }
     // If this was the selected model, fall back to default
     if settings.speechModel == model.id {
       settings.speechModel = SpeechModel.defaultModel.rawValue
@@ -213,7 +209,7 @@ struct SpeechModelTab: View {
       isReady = state == .ready
       displayName = builtin.displayName
     } else if let custom = selectedCustomModel {
-      isReady = custom.isDownloaded
+      isReady = customDownloadState(for: custom) == .ready
       displayName = custom.displayName
     } else {
       isReady = false

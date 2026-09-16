@@ -1,0 +1,29 @@
+{
+  "date": "2026-09-15",
+  "hardware": {
+    "chip": "Apple M4",
+    "memoryGB": 24
+  },
+  "source": "macOS synthesized speech (Tingting and Samantha); not a real microphone benchmark",
+  "languageMode": "auto",
+  "results": [
+    {
+      "audioSeconds": 4.3125,
+      "inferenceSeconds": 0.418355708301533,
+      "loadSeconds": 3.298128208320122,
+      "model": "mlx-community/Qwen3-ASR-0.6B-4bit",
+      "reference": "今天下午三点开会，请把会议记录发给我。",
+      "sample": "zh-synthetic",
+      "transcript": "今天下午三点开会，请把会议记录发给我。"
+    },
+    {
+      "audioSeconds": 2.7845,
+      "inferenceSeconds": 0.2621171666542068,
+      "loadSeconds": 3.298128208320122,
+      "model": "mlx-community/Qwen3-ASR-0.6B-4bit",
+      "reference": "Please send the meeting notes before three this afternoon.",
+      "sample": "en-synthetic",
+      "transcript": "Please send the meeting notes before three this afternoon."
+    }
+  ]
+}

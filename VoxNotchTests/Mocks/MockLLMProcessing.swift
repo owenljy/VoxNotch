@@ -9,6 +9,7 @@ import Foundation
 final class MockLLMProcessing: LLMProcessing {
     var isEnabled: Bool = false
 
+    var onProcess: (() async -> Void)?
     var processCallCount = 0
     var lastProcessedText: String?
     var lastLanguage: String?
@@ -18,6 +19,7 @@ final class MockLLMProcessing: LLMProcessing {
         processCallCount += 1
         lastProcessedText = text
         lastLanguage = language
+        await onProcess?()
         return stubbedResult ?? .skipped(originalText: text)
     }
 }

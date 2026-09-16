@@ -278,14 +278,15 @@ struct TranscriptionRowView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
       // Preview text
       Text(transcription.displayText)
-        .font(.body)
+        .font(InterfaceScale.Typography.body)
+        .lineSpacing(InterfaceScale.Space.small)
         .lineLimit(2)
 
       // Metadata pills
-      HStack(spacing: 6) {
+      HStack(spacing: InterfaceScale.Space.medium) {
         MetadataPill(icon: "clock", text: relativeDate)
 
         MetadataPill(icon: "waveform", text: resolveModelDisplayName(transcription.model))
@@ -297,12 +298,12 @@ struct TranscriptionRowView: View {
         Spacer()
 
         Text(formattedDuration)
-          .font(.caption2)
+          .font(InterfaceScale.Typography.caption)
           .foregroundStyle(.tertiary)
           .monospacedDigit()
       }
     }
-    .padding(.vertical, 4)
+    .padding(.vertical, InterfaceScale.Space.small)
   }
 }
 
@@ -314,11 +315,11 @@ private struct MetadataPill: View {
   var tint: Color? = nil
 
   var body: some View {
-    HStack(spacing: 3) {
+    HStack(spacing: InterfaceScale.Space.small) {
       Image(systemName: icon)
         .font(.system(size: 9))
       Text(text)
-        .font(.caption2)
+        .font(InterfaceScale.Typography.caption)
         .lineLimit(1)
     }
     .foregroundStyle(tint ?? .secondary)
@@ -355,14 +356,15 @@ struct TranscriptionDetailView: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 20) {
+      VStack(alignment: .leading, spacing: InterfaceScale.Space.large) {
         // Header badges
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
           Text(formattedDate)
-            .font(.subheadline)
+            .font(InterfaceScale.Typography.body)
+            .lineSpacing(InterfaceScale.Space.small)
             .foregroundStyle(.secondary)
 
-          HStack(spacing: 8) {
+          HStack(spacing: InterfaceScale.Space.medium) {
             DetailBadge(icon: "clock", text: formattedDuration)
             DetailBadge(icon: "waveform", text: resolveModelDisplayName(transcription.model))
 
@@ -385,33 +387,35 @@ struct TranscriptionDetailView: View {
         // Text content
         if transcription.wasProcessed {
           // Enhanced + original comparison
-          VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+          VStack(alignment: .leading, spacing: InterfaceScale.Space.large) {
+            VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
               Label("Enhanced", systemImage: "sparkles")
-                .font(.caption)
+                .font(InterfaceScale.Typography.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.purple)
 
               Text(transcription.processedText ?? "")
-                .font(.body)
+                .font(InterfaceScale.Typography.body)
+                .lineSpacing(InterfaceScale.Space.small)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(12)
+                .padding(InterfaceScale.Space.large)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.purple.opacity(0.04))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
               Label("Original", systemImage: "text.quote")
-                .font(.caption)
+                .font(InterfaceScale.Typography.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
               Text(transcription.rawText)
-                .font(.body)
+                .font(InterfaceScale.Typography.body)
+                .lineSpacing(InterfaceScale.Space.small)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(12)
+                .padding(InterfaceScale.Space.large)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.secondary.opacity(0.04))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -419,13 +423,14 @@ struct TranscriptionDetailView: View {
           }
         } else {
           Text(transcription.rawText)
-            .font(.body)
+            .font(InterfaceScale.Typography.body)
+            .lineSpacing(InterfaceScale.Space.small)
             .fixedSize(horizontal: false, vertical: true)
         }
 
         Spacer()
       }
-      .padding()
+      .padding(InterfaceScale.Space.large)
       .textSelection(.enabled)
     }
     .toolbar {
@@ -454,15 +459,15 @@ private struct DetailBadge: View {
   var tint: Color? = nil
 
   var body: some View {
-    HStack(spacing: 4) {
+    HStack(spacing: InterfaceScale.Space.small) {
       Image(systemName: icon)
         .font(.system(size: 10))
       Text(text)
-        .font(.caption)
+        .font(InterfaceScale.Typography.caption)
     }
     .foregroundStyle(tint ?? .secondary)
-    .padding(.horizontal, 8)
-    .padding(.vertical, 4)
+    .padding(.horizontal, InterfaceScale.Space.medium)
+    .padding(.vertical, InterfaceScale.Space.small)
     .background((tint ?? .secondary).opacity(0.08))
     .clipShape(Capsule())
   }

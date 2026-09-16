@@ -6,36 +6,69 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: test
     runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: '26.6'
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re
+          project = pathlib.Path("VoxNotch.xcodeproj/project.pbxproj").read_text()
+          versions = set(re.findall(r"MARKETING_VERSION = ([^;]+);", project))
+          tag = os.environ["RELEASE_TAG"]
+          if not re.fullmatch(r"v\d+\.\d+\.\d+", tag) or versions != {tag[1:]}:
+              raise SystemExit(f"Release tag {tag} does not match project versions {versions}")
+          PY
 
       - name: Build Release archive
         run: |
+          set -o pipefail
           xcodebuild archive \
+            -project VoxNotch.xcodeproj \
             -scheme VoxNotch \
             -configuration Release \
-            -archivePath $RUNNER_TEMP/VoxNotch.xcarchive \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/VoxNotch.xcarchive" \
+            -disableAutomaticPackageResolution \
             -skipMacroValidation \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RUNNER_TEMP/archive.log"
 
-      - name: Export .app from archive
+      - name: Export and verify app version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          mkdir -p $RUNNER_TEMP/export
-          cp -R $RUNNER_TEMP/VoxNotch.xcarchive/Products/Applications/VoxNotch.app $RUNNER_TEMP/export/
+          mkdir -p "$RUNNER_TEMP/export"
+          cp -R "$RUNNER_TEMP/VoxNotch.xcarchive/Products/Applications/VoxNotch.app" "$RUNNER_TEMP/export/"
+          app_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/export/VoxNotch.app/Contents/Info.plist")
+          test "v$app_version" = "$RELEASE_TAG"
 
-      - name: Create DMG
+      - name: Create DMG and checksum
         run: |
           brew install create-dmg
           create-dmg \
@@ -43,11 +76,25 @@ jobs:
             --window-size 600 400 \
             --icon "VoxNotch.app" 150 200 \
             --app-drop-link 450 200 \
-            $RUNNER_TEMP/VoxNotch.dmg \
-            $RUNNER_TEMP/export/
+            "$RUNNER_TEMP/VoxNotch.dmg" \
+            "$RUNNER_TEMP/export/"
+          cd "$RUNNER_TEMP"
+          shasum -a 256 VoxNotch.dmg > VoxNotch.dmg.sha256
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ runner.temp }}/VoxNotch.dmg
+          files: |
+            ${{ runner.temp }}/VoxNotch.dmg
+            ${{ runner.temp }}/VoxNotch.dmg.sha256
+          fail_on_unmatched_files: true
           generate_release_notes: true
+
+      - name: Save archive log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-log
+          path: ${{ runner.temp }}/archive.log
+          if-no-files-found: ignore
+          retention-days: 7

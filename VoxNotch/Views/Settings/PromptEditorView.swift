@@ -20,9 +20,9 @@ struct PromptEditorView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: InterfaceScale.Space.medium) {
       // Toolbar: mode picker + helpers
-      HStack(spacing: 12) {
+      HStack(spacing: InterfaceScale.Space.large) {
         Picker("", selection: $mode) {
           ForEach(EditorMode.allCases, id: \.self) { m in
             Text(m.rawValue).tag(m)
@@ -38,7 +38,7 @@ struct PromptEditorView: View {
         Spacer()
 
         Text("\(text.count) chars")
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
           .foregroundStyle(.tertiary)
           .monospacedDigit()
       }
@@ -64,16 +64,18 @@ struct PromptEditorView: View {
       if isReadOnly {
         ScrollView {
           Text(text)
-            .font(.system(.body, design: .monospaced))
+            .font(InterfaceScale.Typography.body.monospaced())
+            .lineSpacing(InterfaceScale.Space.small)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
+            .padding(InterfaceScale.Space.medium)
         }
         .background(Color.secondary.opacity(0.06))
       } else {
         TextEditor(text: $text)
-          .font(.system(.body, design: .monospaced))
+          .font(InterfaceScale.Typography.body.monospaced())
+            .lineSpacing(InterfaceScale.Space.small)
           .scrollContentBackground(.hidden)
-          .padding(4)
+          .padding(InterfaceScale.Space.small)
           .background(Color.secondary.opacity(0.06))
       }
     }
@@ -93,10 +95,10 @@ struct PromptEditorView: View {
           Text(text)
         }
       }
-      .font(.body)
+      .font(InterfaceScale.Typography.body)
       .textSelection(.enabled)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(10)
+      .padding(InterfaceScale.Space.medium)
     }
     .background(Color.secondary.opacity(0.06))
   }
@@ -104,7 +106,7 @@ struct PromptEditorView: View {
   // MARK: - Prompt Helpers
 
   private var promptHelpers: some View {
-    HStack(spacing: 4) {
+    HStack(spacing: InterfaceScale.Space.small) {
       Divider()
         .frame(height: 16)
 
@@ -116,7 +118,7 @@ struct PromptEditorView: View {
         }
       } label: {
         Label("Insert", systemImage: "plus.rectangle.on.rectangle")
-          .font(.caption)
+          .font(InterfaceScale.Typography.caption)
       }
       .menuStyle(.button)
       .fixedSize()

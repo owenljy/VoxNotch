@@ -27,8 +27,10 @@ struct TranscriptionTab: View {
         Toggle("Add space after transcription", isOn: $settings.addSpaceAfterTranscription)
       } header: {
         Text("Delivery")
+          .settingsSectionHeading()
       } footer: {
         Text("Transcribed text is pasted into whichever app was active when you started recording.")
+          .settingsSectionNote()
       }
 
       // MARK: Text Cleanup
@@ -42,8 +44,10 @@ struct TranscriptionTab: View {
         }
       } header: {
         Text("Text Cleanup")
+          .settingsSectionHeading()
       } footer: {
         Text("Automatic corrections applied to transcriptions before output. These run locally and don't use AI.")
+          .settingsSectionNote()
       }
 
       // MARK: Sound Feedback
@@ -89,20 +93,20 @@ struct TranscriptionTab: View {
               SoundManager.shared.previewSound()
             } label: {
               Label("Preview", systemImage: "speaker.wave.2")
-                .font(.caption)
+                .font(InterfaceScale.Typography.caption)
             }
             .buttonStyle(.borderless)
           }
         }
       } header: {
         Text("Sound Feedback")
+          .settingsSectionHeading()
       } footer: {
         Text("Plays an audio cue when transcription is complete and pasted.")
+          .settingsSectionNote()
       }
     }
-    .formStyle(.grouped)
-    .scrollIndicators(.never)
-    .padding()
+    .settingsFormLayout()
   }
 
   private var successSoundDisplayName: String {

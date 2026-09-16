@@ -52,6 +52,39 @@ final class TextOutputManager {
 
     static let shared = TextOutputManager()
 
+    private var recordedTargetPID: pid_t?
+    private var recordedFocus: AXUIElement?
+    private var recordedWindow: AXUIElement?
+
+    func captureTarget() {
+        recordedTargetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        recordedFocus = recordedTargetPID.flatMap { focusedAttribute(kAXFocusedUIElementAttribute, pid: $0) }
+        recordedWindow = recordedTargetPID.flatMap { focusedAttribute(kAXFocusedWindowAttribute, pid: $0) }
+    }
+
+    func isTargetCurrent(_ app: NSRunningApplication?) -> Bool {
+        guard let app, let pid = recordedTargetPID,
+              app.processIdentifier == pid,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+        if let recordedWindow {
+            guard let current = focusedAttribute(kAXFocusedWindowAttribute, pid: pid),
+                  CFEqual(recordedWindow, current) else { return false }
+        }
+        if let recordedFocus {
+            guard let current = focusedAttribute(kAXFocusedUIElementAttribute, pid: pid),
+                  CFEqual(recordedFocus, current) else { return false }
+        }
+        return true
+    }
+
+    private func focusedAttribute(_ attribute: String, pid: pid_t) -> AXUIElement? {
+        let app = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, attribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
     private let keystrokeDelay: TimeInterval = 0.01
     private let keystrokeLengthThreshold: Int = 50
 
@@ -69,18 +102,13 @@ final class TextOutputManager {
     /// Output text using clipboard paste or keystroke simulation depending on settings
     /// - Parameter text: The text to output
     func output(_ text: String) async throws {
-        if SettingsManager.shared.useClipboardForOutput {
-            do {
-                try await outputViaClipboard(text)
-            } catch {
-                try await outputViaKeystrokes(text)
-            }
+        try Task.checkCancellation()
+        guard isTargetCurrent(NSWorkspace.shared.frontmostApplication) else { throw TextOutputError.targetAppChanged }
+        // Only retry failures that occurred before any text could be inserted.
+        if SettingsManager.shared.useClipboardForOutput || text.count > keystrokeLengthThreshold {
+            try await outputViaClipboard(text)
         } else {
-            do {
-                try await outputViaKeystrokes(text)
-            } catch {
-                try await outputViaClipboard(text)
-            }
+            try await outputViaKeystrokes(text)
         }
     }
 
@@ -100,9 +128,11 @@ final class TextOutputManager {
         // Capture the frontmost PID so we can detect app switches mid-stream.
         let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
-        for (index, char) in text.enumerated() {
-            // Every 10 characters, verify the target app is still frontmost.
-            if let pid = targetPID, index > 0, index % 10 == 0,
+        for char in text {
+            try Task.checkCancellation()
+            guard isTargetCurrent(NSWorkspace.shared.frontmostApplication) else { throw TextOutputError.targetAppChanged }
+            // Verify the target before every character.
+            if let pid = targetPID,
                let current = NSWorkspace.shared.frontmostApplication,
                current.processIdentifier != pid {
                 throw TextOutputError.targetAppChanged
@@ -121,27 +151,27 @@ final class TextOutputManager {
 
         let pasteboard = NSPasteboard.general
 
-        // Save current clipboard if needed
-        var previousContent: String?
-        if restoreClipboard {
-            previousContent = pasteboard.string(forType: .string)
-        }
-
-        // Set new content
+        try Task.checkCancellation()
+        let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let previous = restoreClipboard ? ClipboardSnapshot(pasteboard: pasteboard) : nil
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
             throw TextOutputError.clipboardFailed
         }
-
-        // Simulate Cmd+V
-        try await simulatePaste()
-
-        // Restore clipboard after a delay
-        if let previous = previousContent {
-            try await Task.sleep(nanoseconds: 100_000_000) // 100ms delay
-            pasteboard.clearContents()
-            pasteboard.setString(previous, forType: .string)
+        let writtenChangeCount = pasteboard.changeCount
+        defer { previous?.restore(to: pasteboard, ifUnchangedSince: writtenChangeCount) }
+        try Task.checkCancellation()
+        guard targetPID == NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              isTargetCurrent(NSWorkspace.shared.frontmostApplication) else {
+            throw TextOutputError.targetAppChanged
         }
+        try await simulatePaste()
+        // Allow the receiving app to read the pasteboard before restoring it.
+        // Finish this cleanup even if the pipeline was cancelled after Cmd+V.
+        try? await Task<Void, Error>.detached {
+            try await Task.sleep(nanoseconds: 300_000_000)
+        }.value
+        try Task.checkCancellation()
     }
 
     // MARK: - Private Methods
@@ -282,4 +312,29 @@ final class TextOutputManager {
         pasteboard.setString(text, forType: .string)
     }
 
+}
+
+
+/// Preserve every pasteboard item/type, including images and rich text.
+struct ClipboardSnapshot {
+    let items: [[NSPasteboard.PasteboardType: Data]]
+
+    init(pasteboard: NSPasteboard) {
+        items = (pasteboard.pasteboardItems ?? []).map { item in
+            var values: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types { values[type] = item.data(forType: type) }
+            return values
+        }
+    }
+
+    func restore(to pasteboard: NSPasteboard, ifUnchangedSince changeCount: Int) {
+        guard pasteboard.changeCount == changeCount else { return }
+        pasteboard.clearContents()
+        let restored = items.map { values in
+            let item = NSPasteboardItem()
+            for (type, data) in values { item.setData(data, forType: type) }
+            return item
+        }
+        if !restored.isEmpty { pasteboard.writeObjects(restored) }
+    }
 }

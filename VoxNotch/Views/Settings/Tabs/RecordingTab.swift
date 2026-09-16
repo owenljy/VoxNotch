@@ -58,13 +58,13 @@ struct RecordingTab: View {
           .tint(isTesting ? .red : .accentColor)
 
           if isTesting {
-            HStack(spacing: 4) {
+            HStack(spacing: InterfaceScale.Space.small) {
               Circle()
                 .fill(Color.red)
                 .frame(width: 8, height: 8)
                 .opacity(0.8)
               Text("Recording...")
-                .font(.caption)
+                .font(InterfaceScale.Typography.caption)
                 .foregroundStyle(.secondary)
             }
           }
@@ -85,18 +85,18 @@ struct RecordingTab: View {
 
         if let error = testError {
           Text(error)
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.red)
         }
 
         if let transcription = testTranscription {
-          VStack(alignment: .leading, spacing: 4) {
+          VStack(alignment: .leading, spacing: InterfaceScale.Space.small) {
             Text("Dictation Result:")
-              .font(.caption)
+              .font(InterfaceScale.Typography.caption)
               .foregroundStyle(.secondary)
             Text(transcription.isEmpty ? "(No speech detected)" : transcription)
-              .font(.body)
-              .padding(8)
+              .font(InterfaceScale.Typography.body)
+              .padding(InterfaceScale.Space.medium)
               .frame(maxWidth: .infinity, alignment: .leading)
               .background(Color.secondary.opacity(0.1))
               .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -104,6 +104,7 @@ struct RecordingTab: View {
         }
       } header: {
         Text("Microphone")
+          .settingsSectionHeading()
       }
 
       // MARK: Speech Detection
@@ -131,11 +132,12 @@ struct RecordingTab: View {
 
         if let vadError {
           Text(vadError)
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.red)
         }
       } header: {
         Text("Speech Detection")
+          .settingsSectionHeading()
       } footer: {
         Text(settings.useVADSpeechGate
           ? "Using neural voice activity detection to filter non-speech audio before transcription."
@@ -154,7 +156,7 @@ struct RecordingTab: View {
         if let error = hotkeyError {
           Text(error)
             .foregroundStyle(.red)
-            .font(.caption)
+            .font(InterfaceScale.Typography.caption)
         }
 
         Button("Reset to Default (\u{2303}\u{2325})") {
@@ -180,8 +182,10 @@ struct RecordingTab: View {
         .buttonStyle(.borderless)
       } header: {
         Text("Hotkey")
+          .settingsSectionHeading()
       } footer: {
         Text("Hold the recording hotkey to dictate your microphone. Hold the system audio hotkey to transcribe what's playing through your speakers (requires Screen Recording permission).")
+          .settingsSectionNote()
       }
 
       // MARK: Recording Behavior
@@ -205,12 +209,11 @@ struct RecordingTab: View {
 
       } header: {
         Text("Recording Behavior")
+          .settingsSectionHeading()
       }
 
     }
-    .formStyle(.grouped)
-    .scrollIndicators(.never)
-    .padding()
+    .settingsFormLayout()
     .onAppear {
       availableMicrophones = AudioCaptureManager.shared.availableInputDevices()
     }

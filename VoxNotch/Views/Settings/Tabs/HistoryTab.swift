@@ -31,8 +31,10 @@ struct HistoryTab: View {
         }
       } header: {
         Text("History")
+          .settingsSectionHeading()
       } footer: {
         Text("View your history from the menu bar icon → History.")
+          .settingsSectionNote()
       }
 
       if settings.historyEnabled {
@@ -50,8 +52,10 @@ struct HistoryTab: View {
           }
         } header: {
           Text("Retention")
+          .settingsSectionHeading()
         } footer: {
           Text("Audio recordings let you re-transcribe with a different model later.")
+          .settingsSectionNote()
         }
       }
 
@@ -76,11 +80,10 @@ struct HistoryTab: View {
         }
       } header: {
         Text("Storage")
+          .settingsSectionHeading()
       }
     }
-    .formStyle(.grouped)
-    .scrollIndicators(.never)
-    .padding()
+    .settingsFormLayout()
     .onAppear {
       loadTranscriptionCount()
     }

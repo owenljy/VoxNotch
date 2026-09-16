@@ -20,9 +20,11 @@ There are other Whisper-based dictation tools, but VoxNotch is built specificall
 
 Hold ⌃⌥ (Control + Option) to start recording. A waveform appears in the notch area while the microphone is active. Release the hotkey to stop; the audio is passed to the selected ASR model and the transcript is delivered to the current application.
 
-Output method depends on whether a text input is focused. The Accessibility API (`AXFocusedUIElement` + `AXRole`) is used to check this — some apps (Chrome, VS Code, Slack, Discord, and others) are whitelisted and always assumed to have a focused input, because their accessibility trees don't reliably expose text roles. If a text input is detected, the transcript is typed character-by-character via CGEvent keystroke simulation. Otherwise it falls back to clipboard paste (writes to `NSPasteboard`, simulates ⌘V, then optionally restores the previous clipboard contents). Each method falls back to the other on failure.
+Output targets the application and, when Accessibility exposes them, the window and input field focused when recording begins. If the target changes, VoxNotch copies the transcript and shows a clipboard notice. Otherwise it inserts via simulated keystrokes or clipboard paste. Optional clipboard restoration preserves all item types and does not overwrite a newer copy.
 
-Optional features that run before output: a VAD gate to filter silence at the start/end of recordings, inverse text normalization (ITN), filler word removal, and an LLM post-processing step (see below).
+Qwen receives the selected language explicitly; Auto leaves the language prompt open and parses the model's detected language. Optional VAD rejects recordings without speech for both ASR engines. ITN, filler removal, and optional local LLM processing run before output.
+
+Voxtral starts processing finalized audio segments during recording. It prefers pauses after three seconds and limits each segment to twelve seconds; stopping flushes the remainder. This uses independent segment inference, not a continuous decoder cache. Long uninterrupted speech may lose context at segment boundaries. The complete WAV remains available for fallback if streaming fails.
 
 ```mermaid
 flowchart LR
@@ -37,7 +39,7 @@ flowchart LR
     H --> I
     I --> J{text input focused?\nAX API / whitelist}
     J -->|yes| K[CGEvent keystroke simulation]
-    J -->|no| L[NSPasteboard + Cmd+V]
+    J -->|no| L[Copy to clipboard]
 ```
 
 ## Installation
@@ -55,7 +57,7 @@ Requires macOS 15 Sequoia or later on Apple Silicon.
 ### Building from source
 
 1. Clone the repo
-2. Open `VoxNotch.xcodeproj` in Xcode 16+
+2. Open `VoxNotch.xcodeproj` in Xcode 26+
 3. Set a development team in Signing & Capabilities
 4. Build and run the `VoxNotch` scheme (⌘R)
 
@@ -68,16 +70,22 @@ Model weights are downloaded on first use from Hugging Face. After that, transcr
 | Model | Engine | Size | Languages | Notes |
 |---|---|---|---|---|
 | Parakeet v2 | FluidAudio | ~500 MB | English | Default; lowest latency |
-| Parakeet v3 | FluidAudio | ~800 MB | 13+ languages | |
 | GLM-ASR Nano | MLX Audio | ~400 MB | Multilingual | Lowest memory use |
-| Qwen3-ASR 1.7B | MLX Audio | ~3.4 GB | Multilingual | Better accuracy on Asian languages |
-| Custom | MLX Audio | varies | varies | Any MLX-format model from Hugging Face |
+| Qwen3-ASR 0.6B (4-bit) | MLX Audio | ~713 MB | Multilingual | Compact Qwen option |
+| Qwen3-ASR 1.7B (4-bit) | MLX Audio | ~1.61 GB | Multilingual | Smaller download than BF16 |
+| Qwen3-ASR 1.7B (BF16) | MLX Audio | ~3.4 GB | Multilingual | Original full-precision option |
+| Voxtral Mini 4B Realtime (4-bit) | MLX Audio | ~3.13 GB | 13 languages | Processes speech segments while recording |
+| Custom | MLX Audio | varies | varies | Supported GLM-ASR, Qwen3-ASR, or Voxtral Realtime MLX checkpoints |
 
-While the hotkey is held, left/right arrow keys cycle through models without opening Settings.
+The Qwen variants have separate downloads and caches. Existing Qwen3-ASR settings continue to select BF16. Sizes describe downloads, not peak runtime memory; quantized accuracy and latency should be evaluated on your own recordings.
+
+While the hotkey is held, left/right arrow keys cycle through models without opening Settings. Models are released after five minutes of inactivity or idle memory pressure; active recordings and inference keep their models alive.
+
+See [local evaluation instructions](docs/asr-evaluation.md) and [implementation notes](docs/asr-optimizations.md).
 
 ## Post-processing
 
-Off by default. When enabled, the raw transcript is passed to a local LLM before output. Supported backends: Apple Intelligence (macOS 15.1+) and Ollama running on localhost.
+Off by default. When enabled, the raw transcript is passed to a local LLM before output. Supported backends: Apple Intelligence (macOS 26+) and Ollama running on localhost.
 
 Built-in prompt presets:
 
@@ -110,15 +118,15 @@ The modifier combination is configurable in Settings.
 
 - **Intel Macs are untested.** Apple Silicon is required for the bundled ASR models; Intel support is not a goal.
 - **The notch UI requires a Mac with a notch** (MacBook Pro 2021+, MacBook Air M2+). Recording works on any Mac, but there will be no waveform in the notch area.
-- **LLM post-processing has hardware requirements.** Apple Intelligence requires macOS 15.1+ on a supported Apple Silicon device. Ollama requires a separately installed and running local instance.
+- **LLM post-processing has hardware requirements.** Apple Intelligence requires macOS 26+ on a supported Apple Silicon device. Ollama requires a separately installed and running local instance.
 - **Custom models must be in MLX format.** Non-MLX models (e.g. GGUF, CoreML) are not supported.
 
 ## Data and privacy
 
-- Audio is kept in memory during transcription and discarded afterwards; it is not written to disk
+- Recordings use temporary WAV files, removed after successful processing or cancellation. Failed recordings may be retained for retry. Optional saved recordings are stored locally alongside history.
 - Transcripts are stored in a local SQLite database at `~/Library/Application Support/VoxNotch/`; history can be cleared or disabled
 - No telemetry or analytics
-- Network access occurs only when downloading model weights from Hugging Face
+- Built-in model configuration and weight downloads use Hugging Face. Arbitrary Hugging Face imports are currently unavailable in the UI; existing imports remain manageable. Transcription runs locally; optional Ollama processing uses the configured endpoint.
 
 ## Requirements
 
@@ -128,7 +136,11 @@ The modifier combination is configurable in Settings.
 - Microphone permission
 - Disk space: ~500 MB for the default model; up to ~3.4 GB more for Qwen3-ASR
 
-LLM post-processing additionally requires Apple Intelligence (macOS 15.1+, supported hardware) or a local Ollama instance.
+LLM post-processing additionally requires Apple Intelligence (macOS 26+, supported hardware) or a local Ollama instance.
+
+## Development and releases
+
+PRs and pushes to `main` run automated tests. Tagged releases run those checks before creating a DMG and SHA-256 checksum. See [release instructions](docs/releasing.md) and [changelog](CHANGELOG.md).
 
 ## License
 

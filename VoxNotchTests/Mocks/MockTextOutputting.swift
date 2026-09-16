@@ -7,6 +7,8 @@ import AppKit
 @testable import VoxNotch
 
 final class MockTextOutputting: TextOutputting {
+    var targetIsCurrent = true
+    func isTargetCurrent(_ app: NSRunningApplication?) -> Bool { targetIsCurrent }
     var hasFocusedTextInputValue: Bool = true
     var outputCallCount = 0
     var copyCallCount = 0

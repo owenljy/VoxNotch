@@ -433,6 +433,51 @@ final class DictationPipelineTests: XCTestCase {
         sm.delegate = previous
     }
 
+    func testCancelDuringLLMDiscardsLateResult() async throws {
+        let started = expectation(description: "LLM started")
+        let released = expectation(description: "LLM returned")
+        var resume: CheckedContinuation<Void, Never>?
+        mockLLM.isEnabled = true
+        mockLLM.onProcess = {
+            await withCheckedContinuation { continuation in
+                resume = continuation
+                started.fulfill()
+            }
+            released.fulfill()
+        }
+        try await sm.beginRecording()
+        sm.recordingStartTime = testClock.now().addingTimeInterval(-2)
+        sm.stopRecordingAndTranscribe(savedFrontmostApp: nil)
+        await fulfillment(of: [started], timeout: 2)
+        sm.cancelPipeline()
+        resume?.resume()
+        await fulfillment(of: [released], timeout: 2)
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(sm.state, .idle)
+        XCTAssertEqual(mockTextOutput.outputCallCount, 0)
+        XCTAssertEqual(mockTextOutput.copyCallCount, 0)
+        XCTAssertEqual(mockAudio.cleanupCallCount, 1)
+    }
+
+    func testChangedTargetCopiesWithoutTyping() async throws {
+        mockTextOutput.targetIsCurrent = false
+        try await sm.beginRecording()
+        sm.recordingStartTime = testClock.now().addingTimeInterval(-2)
+        sm.stopRecordingAndTranscribe(savedFrontmostApp: nil)
+        try await waitForTerminalState()
+        XCTAssertEqual(mockTextOutput.outputCallCount, 0)
+        XCTAssertEqual(mockTextOutput.copyCallCount, 1)
+    }
+
+    func testSuccessfulInsertionDoesNotOverwriteRestoredClipboard() async throws {
+        try await sm.beginRecording()
+        sm.recordingStartTime = testClock.now().addingTimeInterval(-2)
+        sm.stopRecordingAndTranscribe(savedFrontmostApp: nil)
+        try await waitForTerminalState()
+        XCTAssertEqual(mockTextOutput.outputCallCount, 1)
+        XCTAssertEqual(mockTextOutput.copyCallCount, 0)
+    }
+
     // MARK: - beginRecording
 
     func testBeginRecordingSetsStateAndStartsAudio() async throws {
