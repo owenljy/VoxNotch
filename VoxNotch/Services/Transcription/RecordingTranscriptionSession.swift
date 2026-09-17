@@ -36,7 +36,7 @@ nonisolated struct RecordingSegmenter {
 
 /// Processes finalized speech segments during recording, then flushes the tail.
 /// The bounded input queue fails rather than silently dropping captured audio.
-nonisolated final class RecordingTranscriptionSession: @unchecked Sendable {
+nonisolated final class RecordingTranscriptionSession: RecordingAudioSession, @unchecked Sendable {
     private let input: AsyncStream<[Float]>.Continuation
     private let cancellation = ASRCancellation()
     private let stateLock = NSLock()

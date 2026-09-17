@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- Add Parakeet Unified English 0.6B (INT8 offline) and Parakeet EOU 120M (320 ms streaming).
+- Flush EOU right context on release so trailing words are not cut off.
+- Isolate model caches and decoder lifecycles; reset EOU between recordings and serialize cancellation with ongoing inference.
+- Pin FluidAudio to a tested revision and use its bundled text-normalization library.
+- Recover disabled hotkey event taps and clarify Accessibility permissions for multiple app copies.
+- Add private, on-device dictation diagnostics with per-stage timings, delivery outcomes, failure categories, and a Settings view.
+- Add local benchmark guidance for real microphone recordings and cross-app delivery checks.
+
+Build number: 5.
+
 ## 0.3.0
 
 - Add Qwen3-ASR 0.6B and 1.7B 4-bit models while preserving the original BF16 selection.

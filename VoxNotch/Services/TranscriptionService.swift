@@ -138,9 +138,7 @@ final class TranscriptionService: @unchecked Sendable {
   private let mlxModelManager = MLXAudioModelManager.shared
 
   /// Primary transcription provider (FluidAudio or MLXAudio)
-  #if canImport(MLXAudioSTT)
-  private var recordingSession: RecordingTranscriptionSession?
-  #endif
+  private var recordingSession: (any RecordingAudioSession)?
   private var recordingLease: UUID?
   private var activeOperations = 0
   private var lastUsed = Date()
@@ -270,6 +268,17 @@ final class TranscriptionService: @unchecked Sendable {
   func beginStreaming() -> (@Sendable ([Float]) -> Void)? {
     cancelStreaming()
     providerLock.withLock { recordingLease = UUID(); lastUsed = Date() }
+    if SpeechModel.resolve(settings.speechModel).builtin == .parakeetEOU {
+      let session = EOURecordingSession { [self] in
+        try await ensureModelReady()
+        guard case .eou(let decoder) = fluidModelManager.getLoadedModel(for: .eou120m) else {
+          throw TranscriptionError.modelNotLoaded
+        }
+        return decoder
+      }
+      providerLock.withLock { recordingSession = session }
+      return { samples in session.append(samples) }
+    }
     #if canImport(MLXAudioSTT)
     guard SpeechModel.resolve(settings.speechModel).builtin == .voxtralMini else { return nil }
     let language = settings.transcriptionLanguage == "auto" ? nil : settings.transcriptionLanguage
@@ -291,10 +300,8 @@ final class TranscriptionService: @unchecked Sendable {
     providerLock.withLock {
       recordingLease = nil
       lastUsed = Date()
-      #if canImport(MLXAudioSTT)
       recordingSession?.cancel()
       recordingSession = nil
-      #endif
     }
   }
 
@@ -305,8 +312,7 @@ final class TranscriptionService: @unchecked Sendable {
       endOperation()
       providerLock.withLock { if recordingLease == lease { recordingLease = nil } }
     }
-    #if canImport(MLXAudioSTT)
-    let session = providerLock.withLock { () -> RecordingTranscriptionSession? in
+    let session = providerLock.withLock { () -> (any RecordingAudioSession)? in
       defer { recordingSession = nil }
       return recordingSession
     }
@@ -330,7 +336,6 @@ final class TranscriptionService: @unchecked Sendable {
         logger.warning("Recording-time inference failed; retrying complete audio: \(error)")
       }
     }
-    #endif
     return try await transcribe(audioURL: audioURL, language: language)
   }
 

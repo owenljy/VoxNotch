@@ -287,9 +287,20 @@ final class DictationStateMachine {
     func stopRecordingAndTranscribe(savedFrontmostApp: NSRunningApplication?) {
         guard case .recording = state else { return }
 
+        let releasedAt = ProcessInfo.processInfo.systemUptime
+        let sourceName = audioManager === systemAudioManager ? "systemAudio" : "microphone"
+        var diagnostic = DictationDiagnostic(
+            timestamp: Date(), model: settings.speechModel, source: sourceName,
+            audioDuration: 0, outcome: "started"
+        )
+
         // Check minimum duration
         let duration = recordingStartTime.map { clock.now().timeIntervalSince($0) } ?? 0
         if duration < minimumRecordingDuration {
+            diagnostic.audioDuration = duration
+            diagnostic.outcome = "cancelled"
+            diagnostic.failureReason = "tooShort"
+            persistDiagnostic(diagnostic)
             cancelPipeline()
             onPipelineCancelled?()
             return
@@ -300,6 +311,10 @@ final class DictationStateMachine {
         do {
             captureResult = try audioManager.stopRecording()
         } catch {
+            diagnostic.audioDuration = duration
+            diagnostic.outcome = "failed"
+            diagnostic.failureReason = "capture"
+            persistDiagnostic(diagnostic)
             transcriptionEngine.cancelStreaming()
             audioManager.onResampledAudioSamples = nil
             audioManager.cancelRecording()
@@ -308,6 +323,7 @@ final class DictationStateMachine {
         }
 
         let capturedSessionID = currentSessionID
+        diagnostic.audioDuration = duration
 
         let recordingManager = audioManager
         recordingManager.onResampledAudioSamples = nil
@@ -320,6 +336,7 @@ final class DictationStateMachine {
             }
 
             do {
+                var stageStart = ProcessInfo.processInfo.systemUptime
                 // Check model ready → warmingUp or transcribing
                 let isReady = await transcriptionEngine.isReady
                 guard isSessionValid(capturedSessionID) else { return }
@@ -329,30 +346,41 @@ final class DictationStateMachine {
 
                 try await transcriptionEngine.ensureModelReady()
                 guard isSessionValid(capturedSessionID) else { return }
+                diagnostic.modelReadyDuration = ProcessInfo.processInfo.systemUptime - stageStart
 
                 if !isReady {
                     await MainActor.run { transition(to: .transcribing) }
                 }
 
                 // Transcribe
+                stageStart = ProcessInfo.processInfo.systemUptime
                 let result = try await transcriptionEngine.finishStreaming(audioURL: captureResult.fileURL, language: nil)
                 guard isSessionValid(capturedSessionID) else { return }
+                diagnostic.asrDuration = ProcessInfo.processInfo.systemUptime - stageStart
 
                 // Post-process text
+                stageStart = ProcessInfo.processInfo.systemUptime
                 let text: String = {
                     let raw = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     let filtered = settings.removeFillerWords ? FillerWordFilter.clean(raw) : raw
                     return settings.applyITN ? NemoTextProcessing.normalizeSentence(filtered) : filtered
                 }()
+                diagnostic.cleanupDuration = ProcessInfo.processInfo.systemUptime - stageStart
 
                 // Empty rejection
                 if text.isEmpty {
+                    diagnostic.outcome = "rejected"
+                    diagnostic.failureReason = "noSpeech"
+                    persistDiagnostic(diagnostic)
                     await MainActor.run { transition(to: .idle) }
                     return
                 }
 
                 // Low-confidence rejection
                 if let confidence = result.confidence, confidence < 0.45 {
+                    diagnostic.outcome = "rejected"
+                    diagnostic.failureReason = "lowConfidence"
+                    persistDiagnostic(diagnostic)
                     await MainActor.run { transition(to: .idle) }
                     return
                 }
@@ -363,6 +391,7 @@ final class DictationStateMachine {
 
                 let finalText: String
                 if llmProcessor.isEnabled {
+                    stageStart = ProcessInfo.processInfo.systemUptime
                     let effectiveLanguage: String? = {
                         if settings.transcriptionLanguage != "auto" {
                             return settings.transcriptionLanguage
@@ -373,6 +402,7 @@ final class DictationStateMachine {
                     }()
                     let llmResult = await llmProcessor.processWithResult(text: text, language: effectiveLanguage)
                     guard isSessionValid(capturedSessionID) else { return }
+                    diagnostic.llmDuration = ProcessInfo.processInfo.systemUptime - stageStart
                     finalText = llmResult.text
                     if case .fallback(_, let error) = llmResult {
                         await MainActor.run { onLLMWarning?(error.localizedDescription) }
@@ -393,10 +423,21 @@ final class DictationStateMachine {
                 )
 
                 // Output text
-                await outputText(finalText, savedFrontmostApp: savedFrontmostApp, sessionID: capturedSessionID)
+                stageStart = ProcessInfo.processInfo.systemUptime
+                let outcome = await outputText(finalText, savedFrontmostApp: savedFrontmostApp, sessionID: capturedSessionID)
+                guard let outcome else { return }
+                diagnostic.outputDuration = ProcessInfo.processInfo.systemUptime - stageStart
+                diagnostic.releaseToOutputDuration = ProcessInfo.processInfo.systemUptime - releasedAt
+                diagnostic.outcome = outcome
+                if outcome == "clipboardAborted" { diagnostic.failureReason = "targetChanged" }
+                persistDiagnostic(diagnostic)
 
             } catch {
                 guard isSessionValid(capturedSessionID) else { return }
+                diagnostic.outcome = "failed"
+                diagnostic.failureReason = "transcriptionOrModel"
+                diagnostic.releaseToOutputDuration = ProcessInfo.processInfo.systemUptime - releasedAt
+                persistDiagnostic(diagnostic)
                 transcriptionEngine.cancelStreaming()
                 shouldCleanupAudio = false
                 await MainActor.run {
@@ -444,15 +485,15 @@ final class DictationStateMachine {
 
     // MARK: - Pipeline: Output Text
 
-    private func outputText(_ text: String, savedFrontmostApp: NSRunningApplication?, sessionID: UUID) async {
-        guard isSessionValid(sessionID) else { return }
+    private func outputText(_ text: String, savedFrontmostApp: NSRunningApplication?, sessionID: UUID) async -> String? {
+        guard isSessionValid(sessionID) else { return nil }
         // Never redirect a completed recording into a different application.
         if !textOutputManager.isTargetCurrent(savedFrontmostApp) {
             transition(to: .outputting)
             textOutputManager.copyToClipboardOnly(text)
             onPipelineOutputSuccess?(.clipboardAborted)
             transition(to: .idle)
-            return
+            return "clipboardAborted"
         }
         let effectiveApp = savedFrontmostApp
 
@@ -460,40 +501,64 @@ final class DictationStateMachine {
 
         await MainActor.run { transition(to: .outputting) }
 
-        guard isSessionValid(sessionID) else { return }
+        guard isSessionValid(sessionID) else { return nil }
         if !textOutputManager.isTargetCurrent(savedFrontmostApp) {
             textOutputManager.copyToClipboardOnly(text)
             onPipelineOutputSuccess?(.clipboardAborted)
             transition(to: .idle)
-            return
+            return "clipboardAborted"
         }
         if hasFocusedInput {
             do {
                 try await textOutputManager.output(text)
-                guard isSessionValid(sessionID) else { return }
+                guard isSessionValid(sessionID) else { return nil }
                 await MainActor.run {
                     onPipelineOutputSuccess?(.inserted)
                     transition(to: .idle)
                 }
+                return "inserted"
             } catch is CancellationError {
-                return
+                return nil
             } catch let error as TextOutputManager.TextOutputError where error == .targetAppChanged {
-                guard isSessionValid(sessionID) else { return }
+                guard isSessionValid(sessionID) else { return nil }
                 // App switched mid-keystroke — fall back to clipboard gracefully.
                 textOutputManager.copyToClipboardOnly(text)
                 await MainActor.run {
                     onPipelineOutputSuccess?(.clipboardAborted)
                     transition(to: .idle)
                 }
+                return "clipboardAborted"
             } catch {
-                guard isSessionValid(sessionID) else { return }
+                guard isSessionValid(sessionID) else { return nil }
                 await MainActor.run { transition(to: .error(error)) }
+                return "failedOutput"
             }
         } else {
             textOutputManager.copyToClipboardOnly(text)
             await MainActor.run {
                 onPipelineOutputSuccess?(.clipboard)
                 transition(to: .idle)
+            }
+            return "clipboard"
+        }
+    }
+
+    private func persistDiagnostic(_ record: DictationDiagnostic) {
+        Task {
+            do {
+                var value = record
+                try await databaseManager.write { db in
+                    try value.insert(db)
+                    // Keep a bounded local log even if the user never opens Diagnostics.
+                    try db.execute(sql: """
+                        DELETE FROM dictation_diagnostic
+                        WHERE id NOT IN (
+                          SELECT id FROM dictation_diagnostic ORDER BY timestamp DESC, id DESC LIMIT 500
+                        )
+                        """)
+                }
+            } catch {
+                logger.error("Failed to save local diagnostic: \(error.localizedDescription)")
             }
         }
     }

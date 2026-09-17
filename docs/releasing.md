@@ -16,10 +16,10 @@ Apple Silicon Mac before releasing ASR changes; see `asr-evaluation.md`.
 
 Update both Debug and Release `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`
 in `VoxNotch.xcodeproj/project.pbxproj`, then update `CHANGELOG.md`.
-Current version: **0.3.0 (4)**.
+Current version: **0.4.0 (5)**.
 
 After committing and pushing the reviewed changes, push the corresponding
-`v0.3.0` tag to publish. The workflow checks the tag against the project version
+`v0.4.0` tag to publish. The workflow checks the tag against the project version
 and then against the archived app's `CFBundleShortVersionString`.
 Only stable `vMAJOR.MINOR.PATCH` tags are accepted.
 

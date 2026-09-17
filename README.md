@@ -69,13 +69,17 @@ Model weights are downloaded on first use from Hugging Face. After that, transcr
 
 | Model | Engine | Size | Languages | Notes |
 |---|---|---|---|---|
-| Parakeet v2 | FluidAudio | ~500 MB | English | Default; lowest latency |
+| Parakeet v2 | FluidAudio | ~500 MB | English | Default |
+| Parakeet Unified English 0.6B | FluidAudio | ~615 MB | English | INT8 offline decoding with overlapping windows |
+| Parakeet EOU 120M | FluidAudio | ~225 MB | English | Stateful streaming with 320 ms chunks |
 | GLM-ASR Nano | MLX Audio | ~400 MB | Multilingual | Lowest memory use |
 | Qwen3-ASR 0.6B (4-bit) | MLX Audio | ~713 MB | Multilingual | Compact Qwen option |
 | Qwen3-ASR 1.7B (4-bit) | MLX Audio | ~1.61 GB | Multilingual | Smaller download than BF16 |
 | Qwen3-ASR 1.7B (BF16) | MLX Audio | ~3.4 GB | Multilingual | Original full-precision option |
 | Voxtral Mini 4B Realtime (4-bit) | MLX Audio | ~3.13 GB | 13 languages | Processes speech segments while recording |
 | Custom | MLX Audio | varies | varies | Supported GLM-ASR, Qwen3-ASR, or Voxtral Realtime MLX checkpoints |
+
+Parakeet EOU processes audio while the hotkey is held and flushes the remaining audio on release. End-of-utterance detection does not automatically stop recording. Unified currently uses offline decoding. Both have separate downloads and caches; Parakeet v2 remains the default.
 
 The Qwen variants have separate downloads and caches. Existing Qwen3-ASR settings continue to select BF16. Sizes describe downloads, not peak runtime memory; quantized accuracy and latency should be evaluated on your own recordings.
 
@@ -126,6 +130,7 @@ The modifier combination is configurable in Settings.
 - Recordings use temporary WAV files, removed after successful processing or cancellation. Failed recordings may be retained for retry. Optional saved recordings are stored locally alongside history.
 - Transcripts are stored in a local SQLite database at `~/Library/Application Support/VoxNotch/`; history can be cleared or disabled
 - No telemetry or analytics
+- The Diagnostics page stores up to 500 local operational records (model, audio source, duration, stage timings, and outcome). It stores no audio, dictated text, or target application name. Diagnostics can be cleared independently of transcription history.
 - Built-in model configuration and weight downloads use Hugging Face. Arbitrary Hugging Face imports are currently unavailable in the UI; existing imports remain manageable. Transcription runs locally; optional Ollama processing uses the configured endpoint.
 
 ## Requirements

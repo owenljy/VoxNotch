@@ -191,9 +191,13 @@ struct OnboardingView: View {
       .padding(.top, 8)
 
       if !hasAccessibilityPermission {
-        Text("After granting Accessibility, this page updates automatically.")
+        Text("Allow this copy of VoxNotch in System Settings → Privacy & Security → Accessibility. If it is already enabled, quit VoxNotch, remove the old entry, then add this app again and reopen it.")
           .font(.caption)
           .foregroundStyle(.tertiary)
+        Text(Bundle.main.bundleURL.path)
+          .font(.caption)
+          .textSelection(.enabled)
+          .foregroundStyle(.secondary)
       }
     }
     .padding()

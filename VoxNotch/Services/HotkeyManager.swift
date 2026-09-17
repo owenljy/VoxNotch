@@ -84,7 +84,10 @@ final class HotkeyManager {
     }
 
     /// Whether the event tap is currently active
-    var isListening: Bool { eventTap != nil }
+    var isListening: Bool {
+        guard let eventTap else { return false }
+        return CFMachPortIsValid(eventTap) && CGEvent.tapIsEnabled(tap: eventTap)
+    }
 
     /// The event tap for capturing global key events
     private var eventTap: CFMachPort?
@@ -139,7 +142,7 @@ final class HotkeyManager {
         // 1. Show an alert if permission is not granted
         // 2. Register the app in the Accessibility list
         // 3. Give the user an "Open System Settings" button
-        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         let isTrusted = AXIsProcessTrustedWithOptions(options)
 
         if isTrusted {
@@ -160,10 +163,8 @@ final class HotkeyManager {
             return false
         }
 
-        guard eventTap == nil else {
-            logger.debug("Already listening")
-            return true
-        }
+        if isListening { return true }
+        if eventTap != nil { stopListening() }
 
         // Create event tap for modifier changes and key down/up events
         // (keyUp is needed to detect release of the secondary hotkey trigger key).
@@ -173,7 +174,7 @@ final class HotkeyManager {
 
         // Create callback wrapper
         let callback: CGEventTapCallBack = { _, type, event, refcon in
-            guard let refcon = refcon else { return Unmanaged.passRetained(event) }
+            guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
             let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
             return manager.handleEvent(type: type, event: event)
         }
@@ -206,6 +207,7 @@ final class HotkeyManager {
 
     /// Stop listening for global hotkey events
     func stopListening() {
+        guard eventTap != nil || runLoopSource != nil else { return }
         if let runLoopSource = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
             self.runLoopSource = nil
@@ -213,10 +215,14 @@ final class HotkeyManager {
 
         if let eventTap = eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
+            CFMachPortInvalidate(eventTap)
             self.eventTap = nil
         }
 
+        if isHotkeyPressed { onHotkeyEvent?(.keyUp) }
+        if isSecondaryHotkeyPressed { onSecondaryHotkeyEvent?(.keyUp) }
         isHotkeyPressed = false
+        isSecondaryHotkeyPressed = false
         logger.info("Stopped listening")
     }
 
@@ -231,7 +237,7 @@ final class HotkeyManager {
 
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         guard !isPaused else {
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
 
         // Re-enable event tap if macOS disabled it (happens after system timeout)
@@ -242,7 +248,7 @@ final class HotkeyManager {
                 print("HotkeyManager: Re-enabled event tap (disabled by system)")
                 #endif
             }
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
 
         // Handle keyDown events: arrow keys for model switching, Cmd+Shift+Space for cues
@@ -293,7 +299,7 @@ final class HotkeyManager {
                 }
             }
 
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
 
         // Handle keyUp: release the secondary hotkey if its trigger key was lifted.
@@ -306,11 +312,11 @@ final class HotkeyManager {
                 }
                 return nil
             }
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
 
         guard type == .flagsChanged else {
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
 
         let currentFlags = event.flags
@@ -371,7 +377,7 @@ final class HotkeyManager {
         }
 
         // Pass the event through (don't consume it)
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     deinit {

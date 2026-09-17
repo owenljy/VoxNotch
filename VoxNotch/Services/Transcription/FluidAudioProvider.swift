@@ -2,7 +2,7 @@
 //  FluidAudioProvider.swift
 //  VoxNotch
 //
-//  Transcription provider using FluidAudio's AsrManager for batch transcription
+//  Transcription provider for FluidAudio TDT, Unified, and EOU models
 //
 
 import Accelerate
@@ -11,10 +11,7 @@ import FluidAudio
 import Foundation
 import os.log
 
-/// Speech-to-text provider using FluidAudio's AsrManager
-/// Implements TranscriptionProvider protocol for seamless integration
-///
-/// Thread Safety: `lock` (NSLock) protects `asrManager` and `isInitializing`.
+/// Speech-to-text provider using model handles owned by FluidAudioModelManager.
 final class FluidAudioProvider: TranscriptionProvider, @unchecked Sendable {
 
   // MARK: - Properties
@@ -24,36 +21,26 @@ final class FluidAudioProvider: TranscriptionProvider, @unchecked Sendable {
   private let logger = Logger(subsystem: "com.jingyuanliang.VoxNotch", category: "FluidAudioProvider")
   private let modelManager = FluidAudioModelManager.shared
 
-  /// ASR manager instance
-  private var asrManager: AsrManager?
-
-  /// Whether ASR manager initialization is in progress (guarded by lock)
-  private var isInitializing = false
-
-  /// Lock for thread safety
-  private let lock = NSLock()
+  private var selectedVersion: FluidAudioModelVersion {
+    SpeechModel.resolve(SettingsManager.shared.speechModel).builtin?.fluidAudioVersion
+      ?? FluidAudioModelVersion(rawValue: SettingsManager.shared.fluidAudioModel) ?? .v2English
+  }
 
   // MARK: - TranscriptionProvider
 
   var isReady: Bool {
     get async {
-      modelManager.isReady
+      modelManager.isVersionReady(selectedVersion)
     }
   }
 
   func transcribe(audioURL: URL, language: String?) async throws -> TranscriptionResult {
     let startTime = Date()
 
-    // Ensure models are loaded (no auto-download)
-    guard modelManager.getLoadedModels() != nil else {
+    try Task.checkCancellation()
+    let version = selectedVersion
+    guard let model = modelManager.getLoadedModel(for: version) else {
       throw TranscriptionError.modelNotLoaded
-    }
-
-    // Initialize ASR manager if needed
-    try await ensureAsrManagerInitialized()
-
-    guard let asr = asrManager else {
-      throw FluidAudioError.modelNotLoaded
     }
 
     // Check if audio contains actual speech (VAD) or energy (RMS fallback)
@@ -67,130 +54,57 @@ final class FluidAudioProvider: TranscriptionProvider, @unchecked Sendable {
       }
     }
 
-    // Ensure audio meets FluidAudio's 1-second minimum, pad with silence if needed
-    let transcriptionURL = try ensureMinimumDuration(audioURL: audioURL)
-    let didPad = transcriptionURL != audioURL
-
-    // Transcribe audio file
-    let result: ASRResult
-    do {
-      result = try await asr.transcribe(transcriptionURL)
-    } catch {
-      // Clean up padded temp file if we created one
-      if didPad { try? FileManager.default.removeItem(at: transcriptionURL) }
-
-      let desc = error.localizedDescription
-      if desc.contains("at least 1 second") || desc.contains("Invalid audio data") {
-        throw TranscriptionError.audioTooShort
+    switch model {
+    case .unified(let manager):
+      let samples = try AudioConverter().resampleAudioFile(audioURL)
+      try Task.checkCancellation()
+      let result = try await manager.transcribeWithTimings(samples)
+      try Task.checkCancellation()
+      guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        throw TranscriptionError.noSpeechDetected
       }
-      logger.error("FluidAudio transcription failed: \(desc)")
-      throw FluidAudioError.transcriptionFailed(desc)
+      return TranscriptionResult(text: result.text, confidence: nil,
+        audioDuration: Double(samples.count) / 16000,
+        processingTime: Date().timeIntervalSince(startTime), provider: name,
+        language: "en", segments: buildSegments(from: result.tokenTimings))
+
+    case .eou(let decoder):
+      let samples = try AudioConverter().resampleAudioFile(audioURL)
+      let session = EOURecordingSession { decoder }
+      for start in stride(from: 0, to: samples.count, by: 5120) {
+        session.append(Array(samples[start..<min(start + 5120, samples.count)]))
+      }
+      let result = try await session.finish()
+      guard !result.text.isEmpty else { throw TranscriptionError.noSpeechDetected }
+      return result
+
+    case .tdt(let manager):
+      let transcriptionURL = try ensureMinimumDuration(audioURL: audioURL)
+      defer {
+        if transcriptionURL != audioURL { try? FileManager.default.removeItem(at: transcriptionURL) }
+      }
+      var decoderState = try TdtDecoderState(decoderLayers: version.asrModelVersion?.decoderLayers ?? 2)
+      let result = try await manager.transcribe(transcriptionURL, decoderState: &decoderState)
+      try Task.checkCancellation()
+      guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        throw TranscriptionError.noSpeechDetected
+      }
+      return TranscriptionResult(text: result.text, confidence: result.confidence,
+        audioDuration: result.duration, processingTime: Date().timeIntervalSince(startTime),
+        provider: name, language: version == .v2English ? "en" : language,
+        segments: result.tokenTimings.map { buildSegments(from: $0) })
     }
-
-    // Clean up padded temp file if we created one
-    if didPad { try? FileManager.default.removeItem(at: transcriptionURL) }
-
-    let processingTime = Date().timeIntervalSince(startTime)
-
-    // Convert ASRResult to TranscriptionResult
-    let text = result.text
-
-    // Handle empty transcription
-    if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      throw TranscriptionError.noSpeechDetected
-    }
-
-    // Build segments from token timings if available
-    var segments: [TranscriptSegment]?
-    if let timings = result.tokenTimings, !timings.isEmpty {
-      segments = buildSegments(from: timings)
-    }
-
-    return TranscriptionResult(
-      text: text,
-      confidence: result.confidence,
-      audioDuration: result.duration,
-      processingTime: processingTime,
-      provider: name,
-      language: language,
-      segments: segments
-    )
   }
 
   // MARK: - Model Management
 
-  /// Load a specific model version
   func loadModel(version: FluidAudioModelVersion) async throws {
-    _ = try await modelManager.downloadAndLoad(version: version)
-    try await ensureAsrManagerInitialized()
+    try await modelManager.downloadAndLoad(version: version)
   }
 
-  /// Ensure ASR manager is initialized with current models.
-  /// Uses `isInitializing` flag to prevent concurrent duplicate initialization (TOCTOU fix).
-  private func ensureAsrManagerInitialized() async throws {
-    lock.lock()
-    if asrManager != nil {
-      lock.unlock()
-      return
-    }
-    if isInitializing {
-      lock.unlock()
-      // Another task is already initializing — wait for it to finish
-      while true {
-        try await Task.sleep(nanoseconds: 50_000_000) // 50ms
-        lock.lock()
-        if asrManager != nil { lock.unlock(); return }
-        if !isInitializing { break } // initialization failed, we'll retry
-        lock.unlock()
-      }
-      // isInitializing is false and asrManager is nil — fall through to initialize
-    }
-    isInitializing = true
-    lock.unlock()
-
-    do {
-      guard let models = modelManager.getLoadedModels() else {
-        lock.lock()
-        isInitializing = false
-        lock.unlock()
-        throw FluidAudioError.modelNotLoaded
-      }
-
-      let manager = AsrManager()
-      try await manager.loadModels(models)
-
-      lock.lock()
-      asrManager = manager
-      isInitializing = false
-      lock.unlock()
-
-      logger.info("ASR manager initialized")
-    } catch {
-      lock.lock()
-      isInitializing = false
-      lock.unlock()
-      throw error
-    }
-  }
-
-  /// Release ASR manager to free model memory
-  func unloadModel() {
-    lock.lock()
-    asrManager = nil
-    isInitializing = false
-    lock.unlock()
-    logger.info("ASR manager unloaded")
-  }
-
-  /// Reinitialize after model change
-  func reinitialize() async throws {
-    lock.lock()
-    asrManager = nil
-    isInitializing = false
-    lock.unlock()
-
-    try await ensureAsrManagerInitialized()
-  }
+  // Model handles are owned only by the manager. Reconfiguration never retains a stale decoder.
+  func unloadModel() {}
+  func reinitialize() async throws {}
 
   // MARK: - Private Helpers
 

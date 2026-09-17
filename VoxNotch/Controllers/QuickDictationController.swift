@@ -204,9 +204,6 @@ final class QuickDictationController {
 
     /// Start the Quick Dictation controller
     func start() {
-        if !hotkeyManager.hasAccessibilityPermission {
-            hotkeyManager.requestAccessibilityPermission()
-        }
         if !AudioCaptureManager.shared.hasMicrophonePermission {
             AudioCaptureManager.shared.requestMicrophonePermission { _ in }
         }
@@ -214,23 +211,23 @@ final class QuickDictationController {
             logger.info("Hotkey listener started")
         } else {
             logger.info("Waiting for accessibility permission...")
-            startPermissionCheck()
         }
+        startPermissionCheck()
     }
 
     private func startPermissionCheck() {
         permissionCheckTimer?.invalidate()
-        permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+        permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
             guard let self = self else {
                 timer.invalidate()
                 return
             }
             if self.hotkeyManager.hasAccessibilityPermission {
-                timer.invalidate()
-                self.permissionCheckTimer = nil
-                if self.hotkeyManager.startListening() {
+                if !self.hotkeyManager.isListening && self.hotkeyManager.startListening() {
                     self.logger.info("Hotkey listener started after permission granted")
                 }
+            } else {
+                self.hotkeyManager.stopListening()
             }
         }
     }

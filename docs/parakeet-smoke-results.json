@@ -1,0 +1,56 @@
+{
+  "date": "2026-09-16",
+  "hardware": "Apple M4, 24 GB RAM",
+  "fixture": "macOS Samantha synthetic English speech",
+  "limitations": "Integration smoke only. Not an accuracy benchmark or hotkey-to-output latency measurement. Timings exclude model loading; EOU includes synthetic right-context flush.",
+  "samples": [
+    {
+      "id": "short",
+      "reference": "Please send the meeting notes before three this afternoon.",
+      "results": [
+        {
+          "model": "fluidaudio-unified-en-0.6b",
+          "audioDurationSeconds": 2.7845,
+          "inferenceSeconds": 0.139739990234375,
+          "transcript": "Please send the meeting notes before 3 this afternoon."
+        },
+        {
+          "model": "fluidaudio-eou-120m",
+          "audioDurationSeconds": 2.7845,
+          "inferenceSeconds": 0.3481245416915044,
+          "transcript": "please send the meeting notes before three this afternoon"
+        },
+        {
+          "model": "fluidaudio-v2",
+          "audioDurationSeconds": 2.7845,
+          "inferenceSeconds": 0.10024893283843994,
+          "transcript": "Please send the meeting notes before 3 this afternoon."
+        }
+      ]
+    },
+    {
+      "id": "long",
+      "reference": "Please send the meeting notes before three this afternoon. We need to review the project schedule and confirm the next release date. After the review, update the documentation and share the final checklist with the team. Make sure all the tests pass before publishing the new version.",
+      "results": [
+        {
+          "model": "fluidaudio-unified-en-0.6b",
+          "audioDurationSeconds": 15.207125,
+          "inferenceSeconds": 0.3670259714126587,
+          "transcript": "Please send the meeting notes before 3 this afternoon. We need to review the project schedule and confirm the next release date. After the review, update the documentation and share the final checklist with the team. Make sure all the tests pass before publishing the new version"
+        },
+        {
+          "model": "fluidaudio-eou-120m",
+          "audioDurationSeconds": 15.207125,
+          "inferenceSeconds": 1.0182889169082046,
+          "transcript": "please send the meeting notes before three this afternoon we need to review the project schedule and confirm the next release date after the review update the documentation and share the final checklist with the team make sure all the tests pass before publishing the new version"
+        },
+        {
+          "model": "fluidaudio-v2",
+          "audioDurationSeconds": 15.207125,
+          "inferenceSeconds": 0.22206103801727295,
+          "transcript": "Please send the meeting notes before 3 this afternoon. We need to review the project schedule and confirm the next release date. After the review, update the documentation and share the final checklist with the team. Make sure all the tests pass before publishing the new version."
+        }
+      ]
+    }
+  ]
+}

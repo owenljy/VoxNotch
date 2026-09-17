@@ -16,22 +16,26 @@ import os.log
 enum FluidAudioModelVersion: String, CaseIterable, Identifiable, Sendable {
   case v2English = "v2"
   case v3Multilingual = "v3"
+  case unifiedEnglish = "unified-en-0.6b"
+  case eou120m = "eou-120m-320ms"
 
   var id: String { rawValue }
 
   var displayName: String {
     switch self {
     case .v2English: return "Parakeet v2 (English)"
+    case .unifiedEnglish: return "Parakeet Unified English 0.6B"
+    case .eou120m: return "Parakeet EOU 120M"
     case .v3Multilingual: return "Parakeet v3 (Multilingual)"
     }
   }
 
   var supportedLanguages: [String] {
     switch self {
-    case .v2English: return ["en"]
+    case .v2English, .unifiedEnglish, .eou120m: return ["en"]
     case .v3Multilingual: return [
-        "en", "zh", "ja", "ko", "es", "fr", "de", "it", "pt", "nl", "pl", "ru", "tr", "ar", "cs",
-        "el", "fi", "hu", "id", "ro", "sk", "sv", "th", "uk", "vi",
+        "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it",
+        "lv", "lt", "mt", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk",
       ]
     }
   }
@@ -39,17 +43,27 @@ enum FluidAudioModelVersion: String, CaseIterable, Identifiable, Sendable {
   var estimatedSizeMB: Int {
     switch self {
     case .v2English: return 500
+    case .unifiedEnglish: return 615
+    case .eou120m: return 225
     case .v3Multilingual: return 800
     }
   }
 
   /// Convert to FluidAudio's AsrModelVersion
-  var asrModelVersion: AsrModelVersion {
+  var asrModelVersion: AsrModelVersion? {
     switch self {
+    case .unifiedEnglish, .eou120m: return nil
     case .v2English: return .v2
     case .v3Multilingual: return .v3
     }
   }
+}
+
+/// Each family retains its own decoder API; Unified is not a TDT AsrModels variant.
+enum LoadedFluidAudioModel: Sendable {
+  case tdt(AsrManager)
+  case unified(UnifiedAsrManager)
+  case eou(EOUDecoder)
 }
 
 // MARK: - FluidAudio Model Manager
@@ -76,7 +90,8 @@ final class FluidAudioModelManager: @unchecked Sendable {
   private(set) var modelStates: [FluidAudioModelVersion: ModelDownloadState] = [:]
 
   /// Currently loaded ASR models
-  private var loadedModels: AsrModels?
+  private var loadedModels: LoadedFluidAudioModel?
+  @ObservationIgnored private var loadTasks: [FluidAudioModelVersion: Task<Void, Error>] = [:]
 
   /// Currently loaded model version
   private(set) var loadedVersion: FluidAudioModelVersion?
@@ -103,90 +118,96 @@ final class FluidAudioModelManager: @unchecked Sendable {
 
   // MARK: - Public Methods
 
-  /// Download and load a model version
-  /// - Parameter version: The model version to download and load
-  /// - Returns: The loaded AsrModels
-  @discardableResult
-  func downloadAndLoad(version: FluidAudioModelVersion) async throws -> AsrModels {
-    let (currentState, cachedModels, currentVersion) = lock.withLock {
-      (modelStates[version], loadedModels, loadedVersion)
-    }
-
-    // Already ready, return cached models
-    if currentState == .ready, let models = cachedModels, currentVersion == version {
-      return models
-    }
-
-    // Already downloading, wait with timeout
-    if case .downloading = currentState {
-      logger.info("Model \(version.rawValue) already downloading, waiting...")
-      let deadline = Date().addingTimeInterval(300) // 5-minute timeout
-      while Date() < deadline {
-        try await Task.sleep(nanoseconds: 500_000_000)  // 500ms
-        let (state, models) = lock.withLock { (modelStates[version], loadedModels) }
-        if case .ready = state, let models {
-          return models
-        }
-        if case .failed(let message) = state {
-          throw FluidAudioError.modelDownloadFailed(message)
-        }
+  /// Concurrent callers for one version share a single download/load operation.
+  func downloadAndLoad(version: FluidAudioModelVersion) async throws {
+    let task = lock.withLock { () -> Task<Void, Error> in
+      if let task = loadTasks[version] { return task }
+      let task = Task { [self] in
+        defer { lock.withLock { loadTasks[version] = nil } }
+        try await performDownloadAndLoad(version: version)
       }
-      throw FluidAudioError.modelDownloadFailed("Download timed out after 5 minutes")
+      loadTasks[version] = task
+      return task
     }
+    try await task.value
+    try Task.checkCancellation()
+  }
 
-    // Start download
+  private func performDownloadAndLoad(version: FluidAudioModelVersion) async throws {
+    if isVersionReady(version) { return }
     await MainActor.run {
-      modelStates[version] = .downloading(progress: 0, downloadedBytes: 0, totalBytes: Int64(version.estimatedSizeMB) * 1_000_000, speedBytesPerSecond: 0)
-      downloadProgress = 0
+      modelStates[version] = .downloading(progress: 0, downloadedBytes: 0,
+        totalBytes: Int64(version.estimatedSizeMB) * 1_000_000, speedBytesPerSecond: 0)
     }
-
-    logger.info("Starting download for FluidAudio model: \(version.rawValue)")
+    let pollingTask = DownloadProgressTracker.poll(
+      directory: modelDirectory(for: version),
+      expectedBytes: Int64(version.estimatedSizeMB) * 1_000_000
+    ) { [weak self] progress, bytes, total, speed in
+      guard let self, self.modelStates[version]?.isDownloading == true else { return }
+      self.modelStates[version] = .downloading(progress: progress, downloadedBytes: bytes,
+        totalBytes: total, speedBytesPerSecond: speed)
+      self.downloadProgress = progress
+    }
+    defer { pollingTask.cancel() }
 
     do {
-      // Download and load models using FluidAudio API
-      let models = try await AsrModels.downloadAndLoad(version: version.asrModelVersion)
-
-      // Verify integrity against saved manifest, or create one for first download
-      if !verifyChecksumManifest(for: version) {
-        await MainActor.run {
-          modelStates[version] = .failed(message: "Model files corrupted (checksum mismatch)")
-        }
-        logger.error("Checksum verification failed for \(version.rawValue)")
-        throw FluidAudioError.modelDownloadFailed("Model files corrupted (checksum mismatch)")
+      let loaded: LoadedFluidAudioModel
+      if version == .eou120m {
+        let manager = StreamingEouAsrManager(chunkSize: .ms320)
+        try await manager.loadModels(to: modelsRoot)
+        loaded = .eou(EOUDecoder(engine: CoreMLEOUEngine(manager: manager)))
+      } else if version == .unifiedEnglish {
+        let manager = UnifiedAsrManager(encoderPrecision: .int8)
+        try await manager.loadModels(to: modelsRoot)
+        loaded = .unified(manager)
+      } else {
+        guard let tdtVersion = version.asrModelVersion else { throw FluidAudioError.modelNotLoaded }
+        let models = try await AsrModels.downloadAndLoad(version: tdtVersion)
+        let manager = AsrManager()
+        try await manager.loadModels(models)
+        loaded = .tdt(manager)
+      }
+      try Task.checkCancellation()
+      guard verifyChecksumManifest(for: version) else {
+        throw FluidAudioError.modelDownloadFailed("Model files corrupted (checksum mismatch). Delete the model and download it again.")
       }
       saveChecksumManifest(for: version)
-
-      lock.withLock {
-        loadedModels = models
+      let previous = lock.withLock {
+        let previous = loadedVersion
+        loadedModels = loaded
         loadedVersion = version
+        return previous
       }
-
       await MainActor.run {
+        if let previous, previous != version { modelStates[previous] = .downloaded }
         modelStates[version] = .ready
-        downloadProgress = 1.0
+        downloadProgress = 1
       }
-
-      logger.info("FluidAudio model \(version.rawValue) loaded successfully")
-      return models
-
     } catch {
-      let errorMessage = error.localizedDescription
-      await MainActor.run {
-        modelStates[version] = .failed(message: errorMessage)
-      }
-      logger.error("Failed to download FluidAudio model: \(errorMessage)")
-      throw FluidAudioError.modelDownloadFailed(errorMessage)
+      await MainActor.run { modelStates[version] = .failed(message: error.localizedDescription) }
+      throw error
     }
   }
 
-  /// Get loaded models if available
-  func getLoadedModels() -> AsrModels? {
-    return lock.withLock { loadedModels }
+  func getLoadedModel(for version: FluidAudioModelVersion) -> LoadedFluidAudioModel? {
+    lock.withLock { loadedVersion == version ? loadedModels : nil }
   }
 
-  /// Check if a specific version is ready
   func isVersionReady(_ version: FluidAudioModelVersion) -> Bool {
-    return lock.withLock { modelStates[version]?.isReady ?? false }
+    lock.withLock { loadedVersion == version && loadedModels != nil }
+  }
+
+  private var modelsRoot: URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("FluidAudio/Models")
+  }
+
+  func modelDirectory(for version: FluidAudioModelVersion) -> URL {
+    if let tdtVersion = version.asrModelVersion {
+      return AsrModels.defaultCacheDirectory(for: tdtVersion)
+    }
+    return modelsRoot.appendingPathComponent(
+      version == .eou120m ? Repo.parakeetEou320.folderName : Repo.parakeetUnified.folderName)
   }
 
   /// Unload current models to free memory
@@ -223,6 +244,7 @@ final class FluidAudioModelManager: @unchecked Sendable {
       (loadedVersion, loadedModels != nil)
     }
     for version in FluidAudioModelVersion.allCases {
+      if lock.withLock({ loadTasks[version] != nil }) { continue }
       let isDownloaded = isVersionDownloaded(version)
       if isDownloaded {
         // If loaded in memory, mark ready; otherwise just downloaded
@@ -241,8 +263,14 @@ final class FluidAudioModelManager: @unchecked Sendable {
 
   /// Check if a specific batch ASR version is downloaded on disk
   func isVersionDownloaded(_ version: FluidAudioModelVersion) -> Bool {
-    let cacheDir = AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
-    return AsrModels.modelsExist(at: cacheDir, version: version.asrModelVersion)
+    let cacheDir = modelDirectory(for: version)
+    if let tdtVersion = version.asrModelVersion {
+      return AsrModels.modelsExist(at: cacheDir, version: tdtVersion)
+    }
+    let required = version == .eou120m
+      ? ModelNames.ParakeetEOU.requiredModels
+      : ModelNames.ParakeetUnified.requiredModels(variant: "offline")
+    return FluidModelCache.isComplete(cacheDir, required: required)
   }
 
   /// Whether Quick Dictation models are ready (batch ASR model is downloaded)
@@ -274,62 +302,7 @@ final class FluidAudioModelManager: @unchecked Sendable {
 
   /// Download batch ASR model only (called from Settings)
   func downloadBatchModel(version: FluidAudioModelVersion) async throws {
-    await MainActor.run {
-      modelStates[version] = .downloading(progress: 0, downloadedBytes: 0, totalBytes: Int64(version.estimatedSizeMB) * 1_000_000, speedBytesPerSecond: 0)
-      downloadProgress = 0
-    }
-
-    logger.info("Downloading batch ASR model: \(version.rawValue)")
-
-    do {
-      let cacheDir = AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
-      let expectedBytes = Int64(version.estimatedSizeMB) * 1_000_000
-      let pollingTask = DownloadProgressTracker.poll(
-        directory: cacheDir,
-        expectedBytes: expectedBytes
-      ) { [weak self] progress, downloadedBytes, totalBytes, speed in
-        guard let self else { return }
-        if case .downloading = self.modelStates[version] {
-          self.modelStates[version] = .downloading(
-            progress: progress, downloadedBytes: downloadedBytes,
-            totalBytes: totalBytes, speedBytesPerSecond: speed
-          )
-          self.downloadProgress = progress
-        }
-      }
-      defer { pollingTask.cancel() }
-
-      let models = try await AsrModels.downloadAndLoad(version: version.asrModelVersion)
-
-      // Verify integrity against saved manifest, or create one for first download
-      if !verifyChecksumManifest(for: version) {
-        await MainActor.run {
-          modelStates[version] = .failed(message: "Model files corrupted (checksum mismatch)")
-        }
-        logger.error("Checksum verification failed for \(version.rawValue)")
-        throw FluidAudioError.modelDownloadFailed("Model files corrupted (checksum mismatch)")
-      }
-      saveChecksumManifest(for: version)
-
-      lock.withLock {
-        loadedModels = models
-        loadedVersion = version
-      }
-
-      await MainActor.run {
-        modelStates[version] = .ready
-        downloadProgress = 1.0
-      }
-
-      logger.info("Batch ASR model \(version.rawValue) downloaded and loaded")
-    } catch {
-      let errorMessage = error.localizedDescription
-      await MainActor.run {
-        modelStates[version] = .failed(message: errorMessage)
-      }
-      logger.error("Failed to download batch ASR model: \(errorMessage)")
-      throw FluidAudioError.modelDownloadFailed(errorMessage)
-    }
+    try await downloadAndLoad(version: version)
   }
 
   // MARK: - Delete Methods
@@ -337,6 +310,9 @@ final class FluidAudioModelManager: @unchecked Sendable {
   /// Delete batch ASR model files.
   /// Must be called from MainActor (writes UI-observable `modelStates`).
   func deleteBatchModel(version: FluidAudioModelVersion) throws {
+    guard !lock.withLock({ loadTasks[version] != nil }) else {
+      throw FluidAudioError.modelDownloadFailed("Wait for the download to finish before deleting this model.")
+    }
     // Atomically check and unload if currently loaded
     lock.withLock {
       if loadedVersion == version {
@@ -345,7 +321,7 @@ final class FluidAudioModelManager: @unchecked Sendable {
       }
     }
 
-    let cacheDir = AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
+    let cacheDir = modelDirectory(for: version)
     if FileManager.default.fileExists(atPath: cacheDir.path) {
       try FileManager.default.removeItem(at: cacheDir)
     }
@@ -374,7 +350,7 @@ final class FluidAudioModelManager: @unchecked Sendable {
   func totalStorageUsedBytes() -> Int64 {
     var total: Int64 = 0
     for version in FluidAudioModelVersion.allCases {
-      let dir = AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
+      let dir = modelDirectory(for: version)
       total += DownloadProgressTracker.directorySize(at: dir)
     }
     return total
@@ -428,7 +404,7 @@ final class FluidAudioModelManager: @unchecked Sendable {
 
   /// Save a checksum manifest alongside the model directory for future verification.
   func saveChecksumManifest(for version: FluidAudioModelVersion) {
-    let cacheDir = AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
+    let cacheDir = modelDirectory(for: version)
     let manifest = buildManifest(for: cacheDir)
     guard !manifest.isEmpty else { return }
 
@@ -445,7 +421,7 @@ final class FluidAudioModelManager: @unchecked Sendable {
   /// Verify a downloaded model's files against its saved checksum manifest.
   /// Returns true if no manifest exists (first download) or all checksums match.
   func verifyChecksumManifest(for version: FluidAudioModelVersion) -> Bool {
-    let cacheDir = AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
+    let cacheDir = modelDirectory(for: version)
     let manifestURL = cacheDir.appendingPathComponent(".voxnotch_checksums.json")
 
     let data: Data

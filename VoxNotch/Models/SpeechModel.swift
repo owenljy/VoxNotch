@@ -21,6 +21,8 @@ enum LanguageSupport: String, Sendable {
 enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
   // FluidAudio models
   case parakeetV2 = "fluidaudio-v2"
+  case parakeetUnified = "fluidaudio-unified-en-0.6b"
+  case parakeetEOU = "fluidaudio-eou-120m"
 
   // MLX Audio models
   case glmAsrNano = "mlx-glm-asr-nano"
@@ -34,6 +36,8 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
   var displayName: String {
     switch self {
     case .parakeetV2: "Parakeet v2"
+    case .parakeetUnified: "Parakeet Unified English 0.6B"
+    case .parakeetEOU: "Parakeet EOU 120M"
     case .glmAsrNano: "GLM-ASR Nano"
     case .qwen3Asr: "Qwen3-ASR 1.7B (BF16)"
     case .qwen3AsrSmall: "Qwen3-ASR 0.6B (4-bit)"
@@ -44,7 +48,7 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
 
   var engine: ASREngine {
     switch self {
-    case .parakeetV2: .fluidAudio
+    case .parakeetV2, .parakeetUnified, .parakeetEOU: .fluidAudio
     case .glmAsrNano, .qwen3Asr, .qwen3AsrSmall, .qwen3AsrQuantized, .voxtralMini: .mlxAudio
     }
   }
@@ -52,6 +56,8 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
   var estimatedSizeMB: Int {
     switch self {
     case .parakeetV2: 500
+    case .parakeetUnified: 615
+    case .parakeetEOU: 225
     case .glmAsrNano: 400
     case .qwen3Asr: 3400
     case .qwen3AsrSmall: 713
@@ -62,14 +68,14 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
 
   var languageSupport: LanguageSupport {
     switch self {
-    case .parakeetV2: .englishOptimized
+    case .parakeetV2, .parakeetUnified, .parakeetEOU: .englishOptimized
     case .glmAsrNano, .qwen3Asr, .qwen3AsrSmall, .qwen3AsrQuantized, .voxtralMini: .multilingual
     }
   }
 
   var languageDescription: String {
     switch self {
-    case .parakeetV2: "English optimized"
+    case .parakeetV2, .parakeetUnified, .parakeetEOU: "English optimized"
     case .glmAsrNano, .qwen3Asr, .qwen3AsrSmall, .qwen3AsrQuantized: "Multilingual"
     case .voxtralMini: "13 languages"
     }
@@ -77,7 +83,7 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
 
   var supportedLanguages: [String] {
     switch self {
-    case .parakeetV2:
+    case .parakeetV2, .parakeetUnified, .parakeetEOU:
       ["en"]
     case .glmAsrNano, .qwen3Asr, .qwen3AsrSmall, .qwen3AsrQuantized:
       ["en", "zh", "ja", "ko", "es", "fr", "de", "it", "pt", "ru", "ar"]
@@ -90,6 +96,8 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
   var fluidAudioVersion: FluidAudioModelVersion? {
     switch self {
     case .parakeetV2: .v2English
+    case .parakeetUnified: .unifiedEnglish
+    case .parakeetEOU: .eou120m
     default: nil
     }
   }
@@ -126,6 +134,8 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
   var tagline: String {
     switch self {
     case .parakeetV2: "Best for English"
+    case .parakeetUnified: "English · INT8"
+    case .parakeetEOU: "English · Streaming"
     case .glmAsrNano: "Fast & Lightweight"
     case .qwen3Asr: "Best for Asian Languages"
     case .qwen3AsrSmall: "Compact Multilingual"
@@ -138,6 +148,10 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
     switch self {
     case .parakeetV2:
       "Ultra-fast English transcription powered by NVIDIA Parakeet. Ideal for everyday dictation with the lowest latency."
+    case .parakeetEOU:
+      "Compact English model that processes audio while you record, using the 320 ms streaming variant. Release the hotkey to finish; sentence-end detection does not stop your recording."
+    case .parakeetUnified:
+      "NVIDIA’s unified English speech model with punctuation and capitalization. Uses the offline CoreML encoder on Apple Silicon; longer recordings are processed in overlapping windows."
     case .glmAsrNano:
       "Compact MLX model optimized for speed and low memory. Best when you need quick results with a minimal footprint."
     case .qwen3Asr:
@@ -156,7 +170,7 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
     case .parakeetV2: 4
     case .glmAsrNano: 3
     case .qwen3Asr: 5
-    case .qwen3AsrSmall, .qwen3AsrQuantized: nil
+    case .qwen3AsrSmall, .qwen3AsrQuantized, .parakeetUnified, .parakeetEOU: nil
     case .voxtralMini: 5
     }
   }
@@ -166,14 +180,14 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
     case .parakeetV2: 5
     case .glmAsrNano: 5
     case .qwen3Asr: 3
-    case .qwen3AsrSmall, .qwen3AsrQuantized: nil
+    case .qwen3AsrSmall, .qwen3AsrQuantized, .parakeetUnified, .parakeetEOU: nil
     case .voxtralMini: 3
     }
   }
 
   var providerIconName: String {
     switch self {
-    case .parakeetV2: "waveform"
+    case .parakeetV2, .parakeetUnified, .parakeetEOU: "waveform"
     case .glmAsrNano: "cpu"
     case .qwen3Asr, .qwen3AsrSmall, .qwen3AsrQuantized: "globe.asia.australia"
     case .voxtralMini: "globe"

@@ -162,6 +162,25 @@ final class DatabaseManager: @unchecked Sendable {
         """)
     }
 
+    migrator.registerMigration("v2_dictation_diagnostic") { db in
+      try db.create(table: "dictation_diagnostic") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("timestamp", .datetime).notNull()
+        t.column("model", .text).notNull()
+        t.column("source", .text).notNull()
+        t.column("audioDuration", .double).notNull()
+        t.column("modelReadyDuration", .double)
+        t.column("asrDuration", .double)
+        t.column("cleanupDuration", .double)
+        t.column("llmDuration", .double)
+        t.column("outputDuration", .double)
+        t.column("releaseToOutputDuration", .double)
+        t.column("outcome", .text).notNull()
+        t.column("failureReason", .text)
+      }
+      try db.create(index: "idx_diagnostic_timestamp", on: "dictation_diagnostic", columns: ["timestamp"])
+    }
+
     /// Run all pending migrations
     do {
       try migrator.migrate(pool)

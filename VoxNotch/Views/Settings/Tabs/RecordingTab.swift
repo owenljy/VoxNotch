@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 import AVFoundation
 import CoreAudio
 import CoreGraphics
@@ -14,6 +15,7 @@ struct RecordingTab: View {
 
   @Bindable private var settings = SettingsManager.shared
   @State private var hotkeyError: String?
+  @State private var accessibilityGranted = HotkeyManager.shared.hasAccessibilityPermission
 
   // VAD state
   @State private var isDownloadingVAD = false
@@ -30,6 +32,24 @@ struct RecordingTab: View {
 
   var body: some View {
     Form {
+      if !accessibilityGranted {
+        Section {
+          Text("Global shortcuts and typing require Accessibility access for this copy of VoxNotch. If an older copy is already listed, quit it and add the app you want to use again.")
+            .fixedSize(horizontal: false, vertical: true)
+          Text(Bundle.main.bundleURL.path)
+            .font(InterfaceScale.Typography.caption)
+            .textSelection(.enabled)
+          Button("Open Accessibility Settings") {
+            HotkeyManager.shared.requestAccessibilityPermission()
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+              NSWorkspace.shared.open(url)
+            }
+          }
+        } header: {
+          Text("Accessibility required")
+            .settingsSectionHeading()
+        }
+      }
       // MARK: Microphone
       Section {
         Picker("Device", selection: Binding(
@@ -214,6 +234,9 @@ struct RecordingTab: View {
 
     }
     .settingsFormLayout()
+    .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+      accessibilityGranted = HotkeyManager.shared.hasAccessibilityPermission
+    }
     .onAppear {
       availableMicrophones = AudioCaptureManager.shared.availableInputDevices()
     }

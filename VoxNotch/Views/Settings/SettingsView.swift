@@ -17,6 +17,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
   case output
   case ai
   case history
+  case diagnostics
 
   var id: String { rawValue }
 
@@ -28,6 +29,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
     case .output: "Transcription"
     case .ai: "Tones"
     case .history: "History"
+    case .diagnostics: "Diagnostics"
     }
   }
 
@@ -39,6 +41,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
     case .output: "text.cursor"
     case .ai: "sparkles"
     case .history: "clock.arrow.circlepath"
+    case .diagnostics: "chart.bar.xaxis"
     }
   }
 }
@@ -72,6 +75,8 @@ struct SettingsView: View {
             .tag(SettingsPanel.general)
           Label("History", systemImage: "clock.arrow.circlepath")
             .tag(SettingsPanel.history)
+          Label("Diagnostics", systemImage: "chart.bar.xaxis")
+            .tag(SettingsPanel.diagnostics)
         }
       }
       .listStyle(.sidebar)
@@ -123,6 +128,9 @@ struct SettingsView: View {
 
     case .history:
       HistoryTab()
+
+    case .diagnostics:
+      DiagnosticsTab()
     }
   }
 }

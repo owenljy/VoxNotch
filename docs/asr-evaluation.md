@@ -71,3 +71,44 @@ Sources:
 - [Qwen Swift loader examples](https://github.com/Blaizzy/mlx-audio-swift/blob/main/Sources/MLXAudioSTT/Models/Qwen3ASR/README.md)
 - [FireRed Swift integration](https://github.com/Blaizzy/mlx-audio-swift/blob/main/Sources/MLXAudioSTT/Models/FireRedASR2/README.md)
 - [Current upstream package requirements](https://github.com/Blaizzy/mlx-audio-swift/blob/main/Package.swift)
+
+## Parakeet integration smoke test
+
+FluidAudio is pinned to `b68f484789d81fda21efbf81e2ca9fcfd9dc22aa`.
+The SDK supplies the native Nemo text-normalization library; the former duplicate
+vendored framework is removed. Unified uses the INT8 offline encoder; EOU uses
+the 320 ms streaming model. Neither replaces the default Parakeet v2.
+
+Run the real download, loading, and transcription paths with an English WAV:
+
+```sh
+TEST_RUNNER_VOXNOTCH_PARAKEET_AUDIO=/absolute/path/english.wav \
+xcodebuild -project VoxNotch.xcodeproj -scheme VoxNotch \
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -parallel-testing-enabled NO -disableAutomaticPackageResolution \
+  -only-testing:VoxNotchTests/ParakeetIntegrationTests/testParakeetHardwareSmoke \
+  CODE_SIGNING_ALLOWED=NO test
+```
+
+This downloads Unified and EOU on first use, checks their independent caches,
+runs both plus v2 through the provider, and repeats EOU with a different input
+buffer size to check state reset and streaming consistency. Set
+`TEST_RUNNER_VOXNOTCH_PARAKEET_EXPECTED_SUFFIX` to the expected final words
+(lowercase, without trailing punctuation) to check tail completeness. Without the audio variable,
+the hardware test skips. Unit tests cover incomplete downloads, cancellation,
+recording serialization, and native text normalization without model weights.
+
+Downloads are approximately 615 MB for Unified and 225 MB for EOU; these are not
+runtime memory estimates. Model sources:
+
+- [Unified CoreML](https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml)
+- [EOU CoreML](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml)
+
+Validated on 2026-09-16 on an Apple M4 with 24 GB RAM using synthetic English
+speech. Unified, EOU, and v2 all transcribed a 15.21-second sample through the real
+provider. EOU additionally matched when fed in smaller streaming buffers. The
+long fixture exposed a truncated final word; flushing two silent 320 ms shifts
+before finishing corrected it. The optional expected-suffix assertion protects
+this case. Full regression: 118 passed, one optional Qwen benchmark skipped.
+Transcripts and timings are recorded in `parakeet-smoke-results.json`; these are
+integration checks, not a comparative accuracy benchmark.
