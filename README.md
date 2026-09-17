@@ -52,6 +52,11 @@ Grab the latest `.dmg` from the [Releases page](https://github.com/owenffff/VoxN
 2. Launch VoxNotch — macOS will ask for **Accessibility** and **Microphone** permissions on first run
 3. The VoxNotch icon appears in the menu bar — hold ⌃⌥ to start recording
 
+Release builds are ad-hoc signed, not Developer ID signed or notarized. macOS may
+block the first launch of a downloaded copy. After verifying the download from
+the Releases page, use System Settings → Privacy & Security → Open Anyway if
+you choose to trust it. See [Apple's guidance](https://support.apple.com/en-sg/guide/mac-help/mh40616/mac).
+
 Requires macOS 15 Sequoia or later on Apple Silicon.
 
 ### Building from source

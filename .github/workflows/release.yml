@@ -65,6 +65,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/export"
           cp -R "$RUNNER_TEMP/VoxNotch.xcarchive/Products/Applications/VoxNotch.app" "$RUNNER_TEMP/export/"
+          # CODE_SIGNING_ALLOWED=NO leaves a linker-signed executable whose
+          # resource seal is incomplete. Seal the exported bundle before DMG.
+          codesign --force --sign - \
+            --entitlements VoxNotch/VoxNotch.entitlements \
+            "$RUNNER_TEMP/export/VoxNotch.app"
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/export/VoxNotch.app"
           app_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/export/VoxNotch.app/Contents/Info.plist")
           test "v$app_version" = "$RELEASE_TAG"
 

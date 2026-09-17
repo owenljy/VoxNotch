@@ -16,14 +16,14 @@ Apple Silicon Mac before releasing ASR changes; see `asr-evaluation.md`.
 
 Update both Debug and Release `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`
 in `VoxNotch.xcodeproj/project.pbxproj`, then update `CHANGELOG.md`.
-Current version: **0.4.0 (5)**.
+Current version: **0.4.1 (6)**.
 
 After committing and pushing the reviewed changes, push the corresponding
-`v0.4.0` tag to publish. The workflow checks the tag against the project version
+`v0.4.1` tag to publish. The workflow checks the tag against the project version
 and then against the archived app's `CFBundleShortVersionString`.
 Only stable `vMAJOR.MINOR.PATCH` tags are accepted.
 
 A successful run publishes `VoxNotch.dmg` and `VoxNotch.dmg.sha256`.
-The release retains the existing unsigned/unnotarized distribution method.
+The release uses ad-hoc signing to seal the app bundle but remains unnotarized.
 Developer ID signing and notarization require Apple distribution credentials
 and are not configured by these workflows.

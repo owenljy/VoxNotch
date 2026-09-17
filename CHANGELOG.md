@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Seal and verify the complete App bundle before creating the DMG; fix the invalid resource signature in the 0.4.0 installer.
+
+Build number: 6.
+
 ## 0.4.0
 
 - Add Parakeet Unified English 0.6B (INT8 offline) and Parakeet EOU 120M (320 ms streaming).
