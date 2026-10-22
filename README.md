@@ -5,14 +5,14 @@
 
   **Dictate into any macOS app using your MacBook's notch.**
 
-  On-device transcription. No cloud. No subscription.
+  On-device transcription. Optional AI conversation copilot. No subscription.
 
   [Download](#installation) · [Build from source](#building-from-source) · [License](#license)
 </div>
 
 ---
 
-VoxNotch is a macOS menu bar dictation app that uses the MacBook notch as its recording UI. Audio is transcribed locally using Apple Silicon–optimised ASR models (FluidAudio, MLX); nothing leaves the device.
+VoxNotch is a macOS menu bar dictation app that uses the MacBook notch as its recording UI. Audio is transcribed locally using Apple Silicon–optimised ASR models (FluidAudio, MLX). The optional Always-On AI copilot sends transcript context to the provider you configure, which can run locally or in the cloud.
 
 There are other Whisper-based dictation tools, but VoxNotch is built specifically around the notch and around models optimised for Apple Silicon — lower latency, lower memory use, and no dependency on a Python runtime or server process.
 
@@ -42,11 +42,30 @@ flowchart LR
     J -->|no| L[Copy to clipboard]
 ```
 
+## Always-On conversation copilot
+
+Toggle Always-On from the menu bar or press ⌃⌘A. A two-pane panel shows English
+transcription from your microphone (Me) and system audio (Them), with AI answers
+below. Speech recognition uses Parakeet v2 on-device; system audio requires
+Screen Recording permission.
+
+Configure the AI provider in Settings with an OpenAI-compatible base URL, model,
+and optional API key. Local Ollama/LM Studio servers and remote providers are
+supported. Ask with ⌃⌘↩ or enable automatic answers after questions and pauses.
+Prompt templates, vocabulary hints, input devices, answer text and panel
+appearance can be changed in Settings or from the panel.
+
+Final transcripts and answers are saved locally by default. Saving and retention
+can be changed in Settings. The Always-On history browser requires macOS 26+.
+AI requests include the selected transcript window and, when enabled, earlier
+AI answers; remote providers receive that text. Audio capture and speech
+recognition remain on-device.
+
 ## Installation
 
 ### Download
 
-Grab the latest `.dmg` from the [Releases page](https://github.com/owenffff/VoxNotch/releases):
+Grab the latest `.dmg` from the [Releases page](https://github.com/owenljy/VoxNotch/releases):
 
 1. Open the `.dmg` and drag **VoxNotch.app** to your Applications folder
 2. Launch VoxNotch — macOS will ask for **Accessibility** and **Microphone** permissions on first run
@@ -120,6 +139,9 @@ When post-processing is off, ITN and filler word removal still run on-device.
 | Cancel recording | Esc (optional, off by default) |
 | Cycle model | ⌃⌥ + ← / → |
 | Cycle tone | ⌃⌥ + ↑ / ↓ |
+| Toggle Always-On | ⌃⌘A |
+| Ask the Always-On AI | ⌃⌘↩ |
+| Previous / next AI answer | ⌃⌘ + ← / → |
 
 The modifier combination is configurable in Settings.
 
@@ -134,6 +156,7 @@ The modifier combination is configurable in Settings.
 
 - Recordings use temporary WAV files, removed after successful processing or cancellation. Failed recordings may be retained for retry. Optional saved recordings are stored locally alongside history.
 - Transcripts are stored in a local SQLite database at `~/Library/Application Support/VoxNotch/`; history can be cleared or disabled
+- Always-On sessions, finalized transcript lines and AI answers are saved locally by default; saving, retention and deletion are configurable. AI requests send transcript context to the selected local or remote provider. API keys are stored in the macOS Keychain.
 - No telemetry or analytics
 - The Diagnostics page stores up to 500 local operational records (model, audio source, duration, stage timings, and outcome). It stores no audio, dictated text, or target application name. Diagnostics can be cleared independently of transcription history.
 - Built-in model configuration and weight downloads use Hugging Face. Arbitrary Hugging Face imports are currently unavailable in the UI; existing imports remain manageable. Transcription runs locally; optional Ollama processing uses the configured endpoint.
