@@ -109,6 +109,10 @@ final class AlwaysOnController {
 
   func askNow() {
     guard state.isActive else { return }
+    guard settings.isProviderConfigured else {
+      SettingsWindowController.shared.show(panel: .aiProvider)
+      return
+    }
     autoTrigger.noteManualAsk()
     AssistantService.shared.ask(trigger: .manual)
   }

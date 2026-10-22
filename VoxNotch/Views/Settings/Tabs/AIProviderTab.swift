@@ -16,6 +16,7 @@ struct AIProviderTab: View {
   @State private var isFetchingModels = false
   @State private var modelsError: String?
   @State private var testState: TestState = .idle
+  @FocusState private var isAPIKeyFocused: Bool
 
   private enum TestState {
     case idle
@@ -32,6 +33,10 @@ struct AIProviderTab: View {
     }
     .formStyle(.grouped)
     .task { await fetchModels(silently: true) }
+    .onAppear {
+      // Arriving here from a "set up AI" prompt: put the cursor in the key field.
+      if settings.apiKey.isEmpty { isAPIKeyFocused = true }
+    }
     .onChange(of: settings.baseURL) { availableModels = []; testState = .idle }
     .onChange(of: settings.apiKey) { testState = .idle }
     .onChange(of: settings.model) { testState = .idle }
@@ -53,6 +58,7 @@ struct AIProviderTab: View {
             SecureField("API Key", text: $settings.apiKey, prompt: Text("sk-…"))
           }
         }
+        .focused($isAPIKeyFocused)
         .autocorrectionDisabled()
 
         Button {

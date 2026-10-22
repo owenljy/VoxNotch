@@ -10,8 +10,8 @@
 		5A12F9E72F50297400E313C7 /* MLXAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 5A12F9E62F50297400E313C7 /* MLXAudio */; };
 		5A12F9E92F50297400E313C7 /* MLXAudioCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5A12F9E82F50297400E313C7 /* MLXAudioCore */; };
 		5A12F9EB2F50297400E313C7 /* MLXAudioSTT in Frameworks */ = {isa = PBXBuildFile; productRef = 5A12F9EA2F50297400E313C7 /* MLXAudioSTT */; };
-		5A9233152F24FE4400DC619E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 5A9232412F24CD3500DC619E /* GRDB */; };
 		5A7E57A32F60000000ABCD01 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 5A7E57A22F60000000ABCD01 /* Textual */; };
+		5A9233152F24FE4400DC619E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 5A9232412F24CD3500DC619E /* GRDB */; };
 		5A9233162F24FE4400DC619E /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 5A9232512F24CD3500DC619E /* FluidAudio */; };
 		5A9233602F250A0000DC619E /* AnyLanguageModel in Frameworks */ = {isa = PBXBuildFile; productRef = 5A9233612F250A0000DC619E /* AnyLanguageModel */; };
 		8F9B73804E030D64A6527FE0 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 338BBE031AFE27E739EBE10B /* Cocoa.framework */; };
@@ -535,8 +535,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/FluidInference/FluidAudio";
 			requirement = {
-				revision = b68f484789d81fda21efbf81e2ca9fcfd9dc22aa;
 				kind = revision;
+				revision = b68f484789d81fda21efbf81e2ca9fcfd9dc22aa;
 			};
 		};
 		5A9233622F250A0000DC619E /* XCRemoteSwiftPackageReference "AnyLanguageModel" */ = {

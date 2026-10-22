@@ -157,8 +157,7 @@ private struct AlwaysOnHeaderView: View {
     }
     .padding(.horizontal, 12)
     .frame(height: 36)
-    .contentShape(Rectangle())
-    .gesture(PanelDragGesture.make(panel))
+    .background(PanelMouseArea(role: .move))
   }
 }
 
@@ -189,9 +188,7 @@ private struct AlwaysOnMinimizedView: View {
       }
     }
     .padding(.horizontal, 12)
-    .contentShape(Rectangle())
-    .onTapGesture(count: 2) { panel.toggleMinimized() }
-    .gesture(PanelDragGesture.make(panel))
+    .background(PanelMouseArea(role: .move) { panel.toggleMinimized() })
   }
 }
 
@@ -259,15 +256,6 @@ private struct LiveStatusBadge: View {
 
 // MARK: - Interaction Helpers
 
-@MainActor
-private enum PanelDragGesture {
-  static func make(_ panel: AlwaysOnPanelController) -> some Gesture {
-    DragGesture(minimumDistance: 2, coordinateSpace: .global)
-      .onChanged { _ in panel.dragChanged() }
-      .onEnded { _ in panel.dragEnded() }
-  }
-}
-
 struct PaneDivider: View {
 
   static let height: CGFloat = 10
@@ -290,7 +278,8 @@ struct PaneDivider: View {
     .onHover { isHovering = $0 }
     .pointerStyle(.rowResize)
     .gesture(
-      DragGesture(minimumDistance: 1)
+      // Window coordinates: the divider itself moves while dragging.
+      DragGesture(minimumDistance: 1, coordinateSpace: .global)
         .onChanged { onChanged($0.translation.height) }
         .onEnded { _ in onEnded() }
     )
@@ -298,8 +287,6 @@ struct PaneDivider: View {
 }
 
 private struct PanelResizeHandle: View {
-
-  @Environment(AlwaysOnPanelController.self) private var panel
 
   var body: some View {
     Canvas { context, size in
@@ -311,13 +298,7 @@ private struct PanelResizeHandle: View {
       }
     }
     .frame(width: 14, height: 14)
-    .contentShape(Rectangle())
-    .pointerStyle(.frameResize(position: .bottomTrailing))
-    .gesture(
-      DragGesture(minimumDistance: 1, coordinateSpace: .global)
-        .onChanged { _ in panel.resizeChanged() }
-        .onEnded { _ in panel.resizeEnded() }
-    )
+    .overlay(PanelMouseArea(role: .resize))
     .help("Resize")
   }
 }

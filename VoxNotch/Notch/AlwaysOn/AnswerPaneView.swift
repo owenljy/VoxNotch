@@ -45,8 +45,8 @@ struct AnswerPaneView: View {
       if settings.isProviderConfigured {
         Text(askHint)
       } else {
-        Text("Connect an AI provider to get answers.")
-        Button("Open AI Settings") { SettingsWindowController.shared.show(panel: .aiProvider) }
+        Text("Add your API key to get answers.")
+        Button("Set Up API Key") { SettingsWindowController.shared.show(panel: .aiProvider) }
           .controlSize(.small)
       }
     }
@@ -70,13 +70,7 @@ private struct AnswerHeaderView: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      Image(systemName: "sparkle")
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(style.them)
-      Text("AI")
-        .font(.system(size: 10, weight: .bold))
-        .tracking(0.6)
-        .foregroundStyle(.white.opacity(0.85))
+      TemplateMenu(style: style)
 
       Text(statusText)
         .font(.system(size: 10).monospacedDigit())
@@ -118,6 +112,9 @@ private struct AnswerHeaderView: View {
   private var statusText: String {
     guard let answer else { return settings.model }
     var parts = [answer.model]
+    if !answer.templateName.isEmpty, answer.templateName != settings.selectedTemplate.name {
+      parts.insert(answer.templateName, at: 0)
+    }
     if answer.trigger == .auto { parts.append("auto") }
     switch answer.status {
     case .waiting: parts.append("thinking…")
@@ -134,6 +131,52 @@ private struct AnswerHeaderView: View {
   private static func milliseconds(_ duration: Duration) -> Int {
     let (seconds, attoseconds) = duration.components
     return Int(seconds) * 1000 + Int(attoseconds / 1_000_000_000_000_000)
+  }
+}
+
+// MARK: - Template Menu
+
+/// Switch prompt templates mid-session; applies to the next answer.
+private struct TemplateMenu: View {
+
+  let style: AlwaysOnStyle
+  @Bindable private var settings = AssistantSettings.shared
+
+  var body: some View {
+    Menu {
+      ForEach(AssistantPromptTemplate.all) { template in
+        Button {
+          settings.promptTemplateID = template.id
+        } label: {
+          if template.id == settings.promptTemplateID {
+            Label(template.name, systemImage: "checkmark")
+          } else {
+            Text(template.name)
+          }
+        }
+      }
+      Divider()
+      Button("Edit Prompts…") { SettingsWindowController.shared.show(panel: .alwaysOn) }
+    } label: {
+      HStack(spacing: 4) {
+        Image(systemName: settings.selectedTemplate.icon)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(style.them)
+        Text(settings.selectedTemplate.name)
+          .font(.system(size: 10, weight: .bold))
+          .foregroundStyle(.white.opacity(0.85))
+        Image(systemName: "chevron.down")
+          .font(.system(size: 7, weight: .bold))
+          .foregroundStyle(.white.opacity(0.5))
+      }
+      .padding(.horizontal, 6)
+      .frame(height: 20)
+      .background(Capsule().fill(Color.white.opacity(0.08)))
+    }
+    .menuStyle(.borderlessButton)
+    .menuIndicator(.hidden)
+    .fixedSize()
+    .help("Prompt template")
   }
 }
 
@@ -161,8 +204,13 @@ private struct AnswerBodyView: View {
               .foregroundStyle(style.text.opacity(0.8))
               .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            Button("Retry") { AssistantService.shared.retry(answer) }
-              .controlSize(.small)
+            if AssistantSettings.shared.isProviderConfigured {
+              Button("Retry") { AssistantService.shared.retry(answer) }
+                .controlSize(.small)
+            } else {
+              Button("Set Up API Key") { SettingsWindowController.shared.show(panel: .aiProvider) }
+                .controlSize(.small)
+            }
           }
           .font(.system(size: 12))
           .padding(10)

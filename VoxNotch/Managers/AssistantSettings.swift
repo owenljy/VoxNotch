@@ -33,8 +33,11 @@ final class AssistantSettings {
     static let isDocked = "assistant.isDocked"
     static let floatingLeft = "assistant.floatingLeft"
     static let floatingTop = "assistant.floatingTop"
-    static let systemPrompt = "assistant.systemPrompt"
+    static let legacySystemPrompt = "assistant.systemPrompt"
+    static let promptTemplateID = "assistant.promptTemplateID"
+    static let promptOverrides = "assistant.promptOverrides"
     static let contextWindowMinutes = "assistant.contextWindowMinutes"
+    static let includePreviousAnswers = "assistant.includePreviousAnswers"
     static let useMicrophone = "assistant.useMicrophone"
     static let useSystemAudio = "assistant.useSystemAudio"
     static let suppressEcho = "assistant.suppressEcho"
@@ -51,7 +54,7 @@ final class AssistantSettings {
     static let baseURL = "https://api.openai.com/v1"
     static let model = "gpt-4o-mini"
     static let temperature = 0.3
-    static let maxTokens = 800
+    static let maxTokens = 2000
     static let textColorHex = "#F5F5F7"
     static let meColorHex = "#4DD68F"
     static let themColorHex = "#66B8FF"
@@ -60,7 +63,8 @@ final class AssistantSettings {
     static let transcriptFraction = 0.5
     static let panelWidth = 560.0
     static let panelHeight = 440.0
-    static let contextWindowMinutes = 10.0
+    /// 0 = the entire session.
+    static let contextWindowMinutes = 0.0
     static let autoAnswerSilence = 1.5
   }
 
@@ -88,13 +92,44 @@ final class AssistantSettings {
 
   // MARK: - Assistant
 
-  var systemPrompt: String {
-    didSet { UserDefaults.standard.set(systemPrompt, forKey: Keys.systemPrompt) }
+  var promptTemplateID: String {
+    didSet { UserDefaults.standard.set(promptTemplateID, forKey: Keys.promptTemplateID) }
   }
 
-  /// How much recent transcript is sent with each request. Shorter = faster first token.
+  /// User edits keyed by template ID; a missing entry means the built-in text.
+  private var promptOverrides: [String: String] {
+    didSet { UserDefaults.standard.set(promptOverrides, forKey: Keys.promptOverrides) }
+  }
+
+  var selectedTemplate: AssistantPromptTemplate {
+    AssistantPromptTemplate.template(id: promptTemplateID)
+  }
+
+  /// The active template's prompt, including any edits.
+  var systemPrompt: String {
+    get { promptOverrides[selectedTemplate.id] ?? selectedTemplate.prompt }
+    set {
+      let id = selectedTemplate.id
+      promptOverrides[id] = newValue == selectedTemplate.prompt ? nil : newValue
+    }
+  }
+
+  var isPromptCustomized: Bool {
+    promptOverrides[selectedTemplate.id] != nil
+  }
+
+  func resetPrompt() {
+    promptOverrides[selectedTemplate.id] = nil
+  }
+
+  /// Minutes of transcript sent with each request; 0 sends the entire session.
   var contextWindowMinutes: Double {
     didSet { UserDefaults.standard.set(contextWindowMinutes, forKey: Keys.contextWindowMinutes) }
+  }
+
+  /// Include earlier AI answers so follow-ups build on what was already suggested.
+  var includePreviousAnswers: Bool {
+    didSet { UserDefaults.standard.set(includePreviousAnswers, forKey: Keys.includePreviousAnswers) }
   }
 
   // MARK: - Always-On Behavior
@@ -236,8 +271,18 @@ final class AssistantSettings {
     maxTokens = defaults.object(forKey: Keys.maxTokens) as? Int ?? Defaults.maxTokens
     apiKey = KeychainStore.string(for: Self.apiKeyAccount) ?? ""
 
-    systemPrompt = defaults.string(forKey: Keys.systemPrompt) ?? AssistantPromptBuilder.defaultSystemPrompt
+    promptTemplateID = defaults.string(forKey: Keys.promptTemplateID) ?? AssistantPromptTemplate.general.id
+    var overrides = defaults.dictionary(forKey: Keys.promptOverrides) as? [String: String] ?? [:]
+    if let legacy = defaults.string(forKey: Keys.legacySystemPrompt) {
+      if legacy != AssistantPromptTemplate.general.prompt, overrides[AssistantPromptTemplate.general.id] == nil {
+        overrides[AssistantPromptTemplate.general.id] = legacy
+      }
+      defaults.set(overrides, forKey: Keys.promptOverrides)
+      defaults.removeObject(forKey: Keys.legacySystemPrompt)
+    }
+    promptOverrides = overrides
     contextWindowMinutes = defaults.object(forKey: Keys.contextWindowMinutes) as? Double ?? Defaults.contextWindowMinutes
+    includePreviousAnswers = defaults.object(forKey: Keys.includePreviousAnswers) as? Bool ?? true
 
     useMicrophone = defaults.object(forKey: Keys.useMicrophone) as? Bool ?? true
     useSystemAudio = defaults.object(forKey: Keys.useSystemAudio) as? Bool ?? true

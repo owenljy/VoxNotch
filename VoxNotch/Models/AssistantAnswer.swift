@@ -26,6 +26,7 @@ nonisolated struct AssistantAnswer: Identifiable, Equatable, Sendable {
   let createdAt: Date
   let trigger: Trigger
   let model: String
+  var templateName = ""
   var markdown: String = ""
   var status: Status = .waiting
   var firstTokenLatency: Duration?

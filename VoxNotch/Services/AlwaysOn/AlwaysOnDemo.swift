@@ -23,7 +23,8 @@ enum AlwaysOnDemo {
 
   static func startIfRequested() {
     if let path = UserDefaults.standard.string(forKey: "settingsSnapshot") {
-      SettingsWindowController.shared.show(panel: .alwaysOn)
+      let panel = UserDefaults.standard.string(forKey: "settingsSnapshotPanel").flatMap(SettingsPanel.init) ?? .alwaysOn
+      SettingsWindowController.shared.show(panel: panel)
       Task {
         try? await Task.sleep(for: .seconds(1.5))
         guard let view = SettingsWindowController.shared.window?.contentView,
@@ -36,6 +37,13 @@ enum AlwaysOnDemo {
     let state = AlwaysOnState.shared
     AlwaysOnPanelController.shared.show()
     state.begin(sources: [.microphone, .systemAudio])
+    if UserDefaults.standard.bool(forKey: "alwaysOnDemoPreparing") {
+      Task {
+        try? await Task.sleep(for: .seconds(2))
+        AlwaysOnPanelController.shared.debugSimulateDrag()
+      }
+      return
+    }
     state.status = .running
     state.startedAt = Date().addingTimeInterval(-754)
 
@@ -56,6 +64,15 @@ enum AlwaysOnDemo {
         state.levels = [:]
         clock = clock.addingTimeInterval(2)
         try? await Task.sleep(for: .milliseconds(500))
+      }
+    }
+
+    if UserDefaults.standard.bool(forKey: "alwaysOnDemoDrag") {
+      Task {
+        try? await Task.sleep(for: .seconds(3))
+        AlwaysOnPanelController.shared.debugSimulateDrag()
+        try? await Task.sleep(for: .seconds(4))
+        AlwaysOnPanelController.shared.debugSimulateDrag()
       }
     }
 

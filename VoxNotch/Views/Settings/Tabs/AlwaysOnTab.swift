@@ -13,14 +13,15 @@ struct AlwaysOnTab: View {
   @Bindable private var settings = AssistantSettings.shared
   private let state = AlwaysOnState.shared
 
-  private static let contextWindows: [Double] = [2, 5, 10, 20, 30]
+  /// 0 = entire session.
+  private static let contextWindows: [Double] = [0, 5, 10, 20, 30]
 
   var body: some View {
     Form {
       sessionSection
-      sourcesSection
-      answersSection
       promptSection
+      answersSection
+      sourcesSection
       appearanceSection
     }
     .formStyle(.grouped)
@@ -109,10 +110,20 @@ struct AlwaysOnTab: View {
 
       Picker(selection: $settings.contextWindowMinutes) {
         ForEach(Self.contextWindows, id: \.self) { minutes in
-          Text("Last \(Int(minutes)) min").tag(minutes)
+          Text(minutes == 0 ? "Entire session" : "Last \(Int(minutes)) min").tag(minutes)
         }
       } label: {
-        InfoLabel(title: "Transcript sent to AI", tooltip: "Less context means a faster first token and lower cost.")
+        InfoLabel(
+          title: "Transcript sent to AI",
+          tooltip: "The whole conversation gives the best answers. A shorter window gives a faster first token and lower cost in long sessions."
+        )
+      }
+
+      Toggle(isOn: $settings.includePreviousAnswers) {
+        InfoLabel(
+          title: "Include earlier AI answers",
+          tooltip: "Earlier suggestions are sent with each request, so the AI builds on what it already gave you (e.g. moves from clarifying questions to code) instead of repeating itself."
+        )
       }
 
       if !settings.isProviderConfigured {
@@ -120,9 +131,8 @@ struct AlwaysOnTab: View {
           Label("No AI provider configured", systemImage: "exclamationmark.triangle.fill")
             .foregroundStyle(.orange)
           Spacer()
-          Button("Set Up…") {
-            NotificationCenter.default.post(
-              name: .settingsNavigateTo, object: nil, userInfo: ["panel": SettingsPanel.aiProvider.rawValue])
+          Button("Set Up API Key…") {
+            SettingsNavigation.shared.requestedPanel = .aiProvider
           }
         }
       }
@@ -135,16 +145,36 @@ struct AlwaysOnTab: View {
 
   private var promptSection: some View {
     Section {
+      Picker(selection: $settings.promptTemplateID) {
+        ForEach(AssistantPromptTemplate.all) { template in
+          Label(template.name, systemImage: template.icon).tag(template.id)
+        }
+      } label: {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Template")
+          Text(settings.selectedTemplate.summary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+
       PromptEditorView(text: $settings.systemPrompt)
+        .id(settings.promptTemplateID)
+
       HStack {
+        if settings.isPromptCustomized {
+          Label("Edited", systemImage: "pencil")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
         Spacer()
-        Button("Reset to Default") { settings.systemPrompt = AssistantPromptBuilder.defaultSystemPrompt }
-          .disabled(settings.systemPrompt == AssistantPromptBuilder.defaultSystemPrompt)
+        Button("Reset Template") { settings.resetPrompt() }
+          .disabled(!settings.isPromptCustomized)
       }
     } header: {
-      Text("System Prompt")
+      Text("Prompt")
     } footer: {
-      Text("The live transcript and an instruction to respond are appended automatically.")
+      Text("Each template keeps its own edits. Switch templates any time from the AI pane in the panel. The transcript and your earlier AI answers are added automatically.")
     }
   }
 

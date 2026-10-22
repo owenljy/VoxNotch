@@ -2,40 +2,53 @@
 //  AssistantPromptBuilder.swift
 //  VoxNotch
 //
-//  Builds chat messages for the Always-On assistant. The prompt prefix is kept
-//  stable between requests (system prompt, then an append-only transcript whose
-//  start moves in whole minutes) so providers with prefix caching can reuse it.
+//  Builds chat messages for the Always-On assistant. The prompt prefix stays
+//  stable between requests (system prompt, then an append-only, chronological
+//  transcript whose optional window start moves in whole minutes) so providers
+//  with prefix caching can reuse it.
 //
 
 import Foundation
 
 nonisolated enum AssistantPromptBuilder {
 
-  static let defaultSystemPrompt = """
-    You are a real-time conversation copilot. You see a live transcript between the user ("Me") and \
-    other participants ("Them"). The transcript comes from speech recognition and may contain errors.
+  static var defaultSystemPrompt: String { AssistantPromptTemplate.general.prompt }
 
-    - Lead with one or two sentences the user can say out loud right away.
-    - Add a short bulleted list of supporting points only when it genuinely helps.
-    - Be concise, specific and natural. No preamble, and don't restate the question.
-    - If nothing needs a response, give one useful insight in a single line.
-    - Use Markdown formatting.
-    """
-
+  /// - Parameters:
+  ///   - previousAnswers: earlier AI answers, interleaved by time so the model can build on them.
+  ///   - window: seconds of history to include; nil or <= 0 sends the entire session.
   static func messages(
     systemPrompt: String,
     transcript: [LiveTranscriptSegment],
+    previousAnswers: [AssistantAnswer] = [],
     trigger: AssistantAnswer.Trigger,
     now: Date,
-    window: TimeInterval
+    window: TimeInterval?
   ) -> [ChatMessage] {
-    let cutoff = Date(timeIntervalSince1970: ((now.timeIntervalSince1970 - window) / 60).rounded(.down) * 60)
-    let lines = transcript
-      .filter { $0.endedAt >= cutoff && !$0.text.isEmpty }
-      .map { "\(speaker(for: $0.source)): \($0.text)" }
+    let cutoff: Date? = window.flatMap { window in
+      guard window > 0 else { return nil }
+      return Date(timeIntervalSince1970: ((now.timeIntervalSince1970 - window) / 60).rounded(.down) * 60)
+    }
+
+    var entries: [(time: Date, text: String)] = transcript
+      .filter { segment in !segment.text.isEmpty && (cutoff.map { segment.endedAt >= $0 } ?? true) }
+      .map { ($0.startedAt, "\(speaker(for: $0.source)): \($0.text)") }
+
+    entries += previousAnswers
+      .filter { answer in
+        !answer.markdown.isEmpty
+          && (answer.status == .done || answer.status == .stopped)
+          && (cutoff.map { answer.createdAt >= $0 } ?? true)
+      }
+      .map { ($0.createdAt, "[Copilot — private suggestion shown only to Me]\n\($0.markdown)\n[/Copilot]") }
+
+    // Stable sort keeps same-time entries in insertion order (speech before answers).
+    let lines = entries.enumerated()
+      .sorted { ($0.element.time, $0.offset) < ($1.element.time, $1.offset) }
+      .map(\.element.text)
 
     let body = """
-      Live conversation transcript (Me = the user, Them = other participants):
+      Live conversation transcript (Me = me, Them = other participants):
       <transcript>
       \(lines.isEmpty ? "(nothing has been said yet)" : lines.joined(separator: "\n"))
       </transcript>
@@ -57,7 +70,7 @@ nonisolated enum AssistantPromptBuilder {
   private static func instruction(for trigger: AssistantAnswer.Trigger) -> String {
     switch trigger {
     case .manual:
-      "Help me with what to say or know right now, focusing on the most recent part of the conversation."
+      "Help me right now, focusing on the most recent part of the conversation."
     case .auto:
       "The other person just finished speaking. Help me respond to what they said last."
     }

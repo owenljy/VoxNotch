@@ -61,10 +61,12 @@ final class AssistantService {
     let messages = AssistantPromptBuilder.messages(
       systemPrompt: settings.systemPrompt,
       transcript: state.displayRows,
+      previousAnswers: settings.includePreviousAnswers ? state.answers : [],
       trigger: trigger,
       now: Date(),
       window: settings.contextWindowMinutes * 60
     )
+    answer.templateName = settings.selectedTemplate.name
 
     state.appendAnswer(answer)
     currentAnswerID = answer.id

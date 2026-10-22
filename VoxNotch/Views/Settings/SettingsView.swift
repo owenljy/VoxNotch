@@ -52,12 +52,24 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
   }
 }
 
+// MARK: - Navigation
+
+/// Requested settings panel. Read with `onChange(initial: true)`, so a request
+/// made before or after the window's view appears is honored either way.
+@MainActor @Observable
+final class SettingsNavigation {
+  static let shared = SettingsNavigation()
+  var requestedPanel: SettingsPanel?
+  private init() {}
+}
+
 // MARK: - Main Settings View
 
 /// Main settings view with mode-based sidebar navigation
 struct SettingsView: View {
 
   @State private var selectedPanel: SettingsPanel = .recording
+  private let navigation = SettingsNavigation.shared
 
   var body: some View {
     HStack(spacing: 0) {
@@ -112,6 +124,12 @@ struct SettingsView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(width: 860, height: 580)
+    .onChange(of: navigation.requestedPanel, initial: true) {
+      if let panel = navigation.requestedPanel {
+        selectedPanel = panel
+        navigation.requestedPanel = nil
+      }
+    }
     .onReceive(NotificationCenter.default.publisher(for: .settingsNavigateTo)) { notification in
       if let rawValue = notification.userInfo?["panel"] as? String,
          let panel = SettingsPanel(rawValue: rawValue)

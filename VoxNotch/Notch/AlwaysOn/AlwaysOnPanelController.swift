@@ -73,6 +73,7 @@ final class AlwaysOnPanelController {
   }
 
   func toggleMinimized() {
+    guard dragStart == nil, resizeStart == nil else { return }
     let top = contentFrame.maxY
     let midX = contentFrame.midX
     isMinimized.toggle()
@@ -83,7 +84,7 @@ final class AlwaysOnPanelController {
       contentFrame = NSRect(x: midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
       clampToScreen()
     }
-    applyFrame(animated: true)
+    applyFrame(deferred: true)
   }
 
   func dock() {
@@ -91,17 +92,18 @@ final class AlwaysOnPanelController {
     isNearDock = false
     settings.isDocked = true
     contentFrame = dockedContentFrame()
-    applyFrame()
+    applyFrame(deferred: true)
   }
 
-  // MARK: - Dragging
+  // MARK: - Dragging (driven by AppKit mouse events, see PanelMouseArea)
+
+  func beginDrag() {
+    dragStart = (NSEvent.mouseLocation, contentFrame)
+  }
 
   func dragChanged() {
+    guard let start = dragStart else { return }
     let mouse = NSEvent.mouseLocation
-    guard let start = dragStart else {
-      dragStart = (mouse, contentFrame)
-      return
-    }
     let dx = mouse.x - start.mouse.x
     let dy = mouse.y - start.mouse.y
     if isDocked {
@@ -124,19 +126,20 @@ final class AlwaysOnPanelController {
       return
     }
     clampToScreen()
-    applyFrame(animated: true)
+    applyFrame()
     settings.isDocked = false
     settings.floatingTopLeft = CGPoint(x: contentFrame.minX, y: contentFrame.maxY)
   }
 
   // MARK: - Resizing
 
+  func beginResize() {
+    resizeStart = (NSEvent.mouseLocation, contentFrame)
+  }
+
   func resizeChanged() {
+    guard let start = resizeStart else { return }
     let mouse = NSEvent.mouseLocation
-    guard let start = resizeStart else {
-      resizeStart = (mouse, contentFrame)
-      return
-    }
     let dx = mouse.x - start.mouse.x
     let dy = mouse.y - start.mouse.y
     let maximum = maximumSize()
@@ -226,17 +229,16 @@ final class AlwaysOnPanelController {
     )
   }
 
-  private func applyFrame(animated: Bool = false) {
-    guard let panel else { return }
-    let target = windowFrame()
-    guard animated else {
-      panel.setFrame(target, display: true)
+  /// `deferred` must be used when called from a SwiftUI action, so the window
+  /// resize happens on the next run-loop turn rather than inside SwiftUI's update.
+  private func applyFrame(deferred: Bool = false) {
+    guard deferred else {
+      panel?.setFrame(windowFrame(), display: false)
       return
     }
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.2
-      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-      panel.animator().setFrame(target, display: true)
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.panel?.setFrame(self.windowFrame(), display: false)
     }
   }
 
@@ -254,14 +256,23 @@ final class AlwaysOnPanelController {
       defer: false
     )
     let hostingView = FirstMouseHostingView(
-      rootView: AlwaysOnRootView()
-        .environment(self)
-        .environment(AlwaysOnState.shared)
+      rootView: AnyView(
+        AlwaysOnRootView()
+          .environment(self)
+          .environment(AlwaysOnState.shared)
+      )
     )
-    // The controller owns the window size; SwiftUI must not resize it to fit content.
+    // The controller owns the window size. The hosting view sits in a plain,
+    // frame-based container so its Auto Layout constraints never feed back into
+    // the window frame (which otherwise loops during moves/resizes).
     hostingView.sizingOptions = []
+    let container = NSView(frame: NSRect(origin: .zero, size: Self.minimumSize))
+    container.autoresizesSubviews = true
+    hostingView.frame = container.bounds
     hostingView.autoresizingMask = [.width, .height]
-    panel.contentView = hostingView
+    hostingView.translatesAutoresizingMaskIntoConstraints = true
+    container.addSubview(hostingView)
+    panel.contentView = container
     panel.sharingType = Self.sharingType
 
     NotificationCenter.default.addObserver(
@@ -300,6 +311,21 @@ extension AlwaysOnPanelController {
     try? rep.representation(using: .png, properties: [:])?.write(to: url)
   }
 
+  /// Moves the panel through the same code path as a real drag, frame by frame.
+  func debugSimulateDrag(steps: Int = 90) {
+    let start = contentFrame
+    Task {
+      for step in 1...steps {
+        if isDocked { isDocked = false }
+        contentFrame.origin = NSPoint(x: start.minX - CGFloat(step) * 3, y: start.minY - CGFloat(step) * 2)
+        applyFrame()
+        print("DRAG step=\(step) frame=\(panel?.frame ?? .zero)")
+        try? await Task.sleep(for: .milliseconds(16))
+      }
+      print("DRAG done frame=\(panel?.frame ?? .zero)")
+    }
+  }
+
   func debugFloat() {
     isDocked = false
     contentFrame.origin.y -= 160
@@ -310,6 +336,8 @@ extension AlwaysOnPanelController {
 #endif
 
 /// The panel never becomes key, so clicks must act on the first mouse-down.
-private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+/// Deliberately non-generic: a generic NSHostingView subclass crashes the Swift 6.3
+/// optimizer (EarlyPerfInliner on its deinit) in Release builds.
+private final class FirstMouseHostingView: NSHostingView<AnyView> {
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
