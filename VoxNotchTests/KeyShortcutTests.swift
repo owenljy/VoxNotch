@@ -12,6 +12,8 @@ final class KeyShortcutTests: XCTestCase {
   func testDefaultsDisplay() {
     XCTAssertEqual(KeyShortcut.defaultAsk.displayString, "⌃⌘↩")
     XCTAssertEqual(KeyShortcut.defaultToggleAlwaysOn.displayString, "⌃⌘A")
+    XCTAssertEqual(KeyShortcut.defaultPreviousAnswer.displayString, "⌃⌘←")
+    XCTAssertEqual(KeyShortcut.defaultNextAnswer.displayString, "⌃⌘→")
   }
 
   func testMatchingIgnoresUnrelatedFlags() {

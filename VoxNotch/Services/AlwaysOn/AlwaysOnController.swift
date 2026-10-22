@@ -256,6 +256,20 @@ enum AlwaysOnShortcuts {
         return true
       })
     }
+    if let previous = settings.previousAnswerShortcut {
+      shortcuts.append(.init(shortcut: previous) {
+        guard AlwaysOnController.shared.isActive else { return false }
+        AlwaysOnState.shared.showAnswer(offset: -1)
+        return true
+      })
+    }
+    if let next = settings.nextAnswerShortcut {
+      shortcuts.append(.init(shortcut: next) {
+        guard AlwaysOnController.shared.isActive else { return false }
+        AlwaysOnState.shared.showAnswer(offset: 1)
+        return true
+      })
+    }
     HotkeyManager.shared.shortcuts = shortcuts
   }
 }

@@ -46,6 +46,8 @@ final class AssistantSettings {
     static let autoAnswerSilence = "assistant.autoAnswerSilence"
     static let toggleShortcut = "assistant.toggleShortcut"
     static let askShortcut = "assistant.askShortcut"
+    static let previousAnswerShortcut = "assistant.previousAnswerShortcut"
+    static let nextAnswerShortcut = "assistant.nextAnswerShortcut"
   }
 
   private static let apiKeyAccount = "assistant.openai.apiKey"
@@ -178,6 +180,14 @@ final class AssistantSettings {
     didSet { Self.save(askShortcut, forKey: Keys.askShortcut) }
   }
 
+  var previousAnswerShortcut: KeyShortcut? {
+    didSet { Self.save(previousAnswerShortcut, forKey: Keys.previousAnswerShortcut) }
+  }
+
+  var nextAnswerShortcut: KeyShortcut? {
+    didSet { Self.save(nextAnswerShortcut, forKey: Keys.nextAnswerShortcut) }
+  }
+
   /// Missing key → default shortcut; empty data → explicitly cleared.
   private static func loadShortcut(forKey key: String, default defaultShortcut: KeyShortcut) -> KeyShortcut? {
     guard let data = UserDefaults.standard.data(forKey: key) else { return defaultShortcut }
@@ -292,6 +302,8 @@ final class AssistantSettings {
     autoAnswerSilence = defaults.object(forKey: Keys.autoAnswerSilence) as? Double ?? Defaults.autoAnswerSilence
     toggleShortcut = Self.loadShortcut(forKey: Keys.toggleShortcut, default: .defaultToggleAlwaysOn)
     askShortcut = Self.loadShortcut(forKey: Keys.askShortcut, default: .defaultAsk)
+    previousAnswerShortcut = Self.loadShortcut(forKey: Keys.previousAnswerShortcut, default: .defaultPreviousAnswer)
+    nextAnswerShortcut = Self.loadShortcut(forKey: Keys.nextAnswerShortcut, default: .defaultNextAnswer)
 
     textColorHex = defaults.string(forKey: Keys.textColorHex) ?? Defaults.textColorHex
     meColorHex = defaults.string(forKey: Keys.meColorHex) ?? Defaults.meColorHex

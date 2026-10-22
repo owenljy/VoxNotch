@@ -48,10 +48,16 @@ struct AlwaysOnTab: View {
       LabeledContent("Ask AI now") {
         ShortcutRecorderField(shortcut: $settings.askShortcut, defaultShortcut: .defaultAsk)
       }
+      LabeledContent("Previous answer") {
+        ShortcutRecorderField(shortcut: $settings.previousAnswerShortcut, defaultShortcut: .defaultPreviousAnswer)
+      }
+      LabeledContent("Next answer") {
+        ShortcutRecorderField(shortcut: $settings.nextAnswerShortcut, defaultShortcut: .defaultNextAnswer)
+      }
     } header: {
       Text("Session")
     } footer: {
-      Text("Shortcuts work from any app. Ask is only captured while Always-On is running.")
+      Text("Shortcuts work from any app and are only captured while Always-On is running.")
     }
   }
 

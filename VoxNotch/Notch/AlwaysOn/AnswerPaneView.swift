@@ -81,12 +81,12 @@ private struct AnswerHeaderView: View {
 
       if state.answers.count > 1, let index = state.displayedAnswerIndex {
         HStack(spacing: 0) {
-          PanelIconButton(systemName: "chevron.left", help: "Previous answer") { state.showAnswer(offset: -1) }
+          PanelIconButton(systemName: "chevron.left", help: previousAnswerHelp) { state.showAnswer(offset: -1) }
             .disabled(index == 0)
           Text("\(index + 1)/\(state.answers.count)")
             .font(.system(size: 10, weight: .medium).monospacedDigit())
             .foregroundStyle(.white.opacity(0.6))
-          PanelIconButton(systemName: "chevron.right", help: "Next answer") { state.showAnswer(offset: 1) }
+          PanelIconButton(systemName: "chevron.right", help: nextAnswerHelp) { state.showAnswer(offset: 1) }
             .disabled(index == state.answers.count - 1)
         }
       }
@@ -107,6 +107,14 @@ private struct AnswerHeaderView: View {
         .help(settings.askShortcut.map { "Ask AI (\($0.displayString))" } ?? "Ask AI")
       }
     }
+  }
+
+  private var previousAnswerHelp: String {
+    settings.previousAnswerShortcut.map { "Previous answer (\($0.displayString))" } ?? "Previous answer"
+  }
+
+  private var nextAnswerHelp: String {
+    settings.nextAnswerShortcut.map { "Next answer (\($0.displayString))" } ?? "Next answer"
   }
 
   private var statusText: String {

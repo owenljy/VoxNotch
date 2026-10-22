@@ -97,4 +97,21 @@ final class AssistantServiceTests: XCTestCase {
     XCTAssertEqual(state.displayedAnswerIndex, 2)
     XCTAssertNil(state.selectedAnswerID, "returning to the last answer resumes following")
   }
+
+  func testPagerShortcutsNavigateHistoryOnlyWhileActive() throws {
+    for _ in 0..<2 {
+      state.appendAnswer(AssistantAnswer(id: UUID(), createdAt: Date(), trigger: .manual, model: "m"))
+    }
+    AlwaysOnShortcuts.install()
+    let previous = try XCTUnwrap(HotkeyManager.shared.shortcuts.first { $0.shortcut == .defaultPreviousAnswer })
+    let next = try XCTUnwrap(HotkeyManager.shared.shortcuts.first { $0.shortcut == .defaultNextAnswer })
+
+    XCTAssertTrue(previous.handler(), "consumes the shortcut while Always-On is running")
+    XCTAssertEqual(state.displayedAnswerIndex, 0)
+    XCTAssertTrue(next.handler())
+    XCTAssertEqual(state.displayedAnswerIndex, 1)
+
+    state.end()
+    XCTAssertFalse(previous.handler(), "lets the key reach other apps once Always-On stops")
+  }
 }

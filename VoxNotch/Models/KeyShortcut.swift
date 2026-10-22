@@ -30,6 +30,18 @@ nonisolated struct KeyShortcut: Codable, Hashable, Sendable {
     keyLabel: "↩"
   )
 
+  static let defaultPreviousAnswer = KeyShortcut(
+    keyCode: UInt16(kVK_LeftArrow),
+    modifiers: CGEventFlags([.maskControl, .maskCommand]).rawValue,
+    keyLabel: "←"
+  )
+
+  static let defaultNextAnswer = KeyShortcut(
+    keyCode: UInt16(kVK_RightArrow),
+    modifiers: CGEventFlags([.maskControl, .maskCommand]).rawValue,
+    keyLabel: "→"
+  )
+
   var displayString: String {
     let flags = CGEventFlags(rawValue: modifiers)
     var symbols = ""
