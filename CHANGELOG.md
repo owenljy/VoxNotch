@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1
+
+- Add editable Always-On prompt templates, vocabulary hints, answer navigation shortcuts, and microphone/output device controls.
+- Save and search local Always-On session history with transcripts and AI answers.
+- Fix recording startup, pause/resume, device-switching and restart races; prevent old transcription and answer tasks from affecting new sessions.
+- Preserve short utterances, the last sentence on stop/quit, and the chronological order of overlapping audio sources.
+- Prevent deleted history and discarded speculative answers from reappearing; preserve session metadata when saving is enabled mid-session.
+- Avoid duplicate automatic answers after a manual request and stop pending automatic triggers when disabled or paused.
+- Fix held shortcut events reaching the front app, Markdown code fences being altered, and stale history search results.
+- Include the Swift optimizer crash workaround missing from the failed 0.5.0 release; verify arm64 archives and the signed app inside the completed DMG before publishing.
+
+Build number: 8.
+
 ## 0.5.0
 
 - Add Always-On mode: continuous on-device transcription of the microphone (Me) and system audio (Them) with Parakeet v2, shown live in a translucent two-pane panel under the notch.
