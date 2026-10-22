@@ -37,6 +37,7 @@ enum AlwaysOnDemo {
     let state = AlwaysOnState.shared
     AlwaysOnPanelController.shared.show()
     state.begin(sources: [.microphone, .systemAudio])
+    AudioDeviceMonitor.shared.start()
     if UserDefaults.standard.bool(forKey: "alwaysOnDemoPreparing") {
       Task {
         try? await Task.sleep(for: .seconds(2))

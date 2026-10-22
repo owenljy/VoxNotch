@@ -15,6 +15,10 @@ nonisolated struct AssistantPromptTemplate: Identifiable, Equatable, Sendable {
   let icon: String
   let summary: String
   let prompt: String
+  /// Typical speech-recognition confusions for this kind of conversation, as
+  /// "heard → meant". Appended to the system prompt so they apply even when the
+  /// prompt text has been edited.
+  var recognitionHints: [String] = []
 
   static let all: [AssistantPromptTemplate] = [general, codingInterview, rrkAIEngineer, clientMeeting, oneOnOne]
 
@@ -59,6 +63,49 @@ nonisolated struct AssistantPromptTemplate: Identifiable, Equatable, Sendable {
       complexity → follow-ups. Work out which step we are at and help with that step, but always give \
       me the full solution so I am never stuck.
 
+      Pattern cues — problems rarely name the algorithm, but the wording usually leaks it. Use these \
+      cues to pick the technique; when a cue has several options, choose by the sub-signal. The \
+      problem names in parentheses are for your reference only — never mention them to me as \
+      something to say:
+      - "Top K", "K-th largest/smallest" → Heap: keep a K-item boundary in O(n log K) instead of \
+      sorting. (K Closest Points)
+      - "Sorted", "rotated sorted", "in O(log n)" → Binary Search: halve the space each step; works on \
+      any monotonic predicate, not just arrays. (Binary Search)
+      - "How many ways" → DFS when choices form a decision tree (Decode Ways); DP when subproblems \
+      overlap on a grid or sequence (Robot Paths).
+      - "Substring" → Sliding Window: contiguous slices grow and shrink in O(1) per step. (Longest \
+      Substring Without Repeating Characters)
+      - "Prefix", "autocomplete", "dictionary lookup", "starts with" → Trie: shared prefix storage, \
+      O(word length) lookup regardless of dictionary size. (Implement Trie)
+      - "Palindrome" → Two Pointers to verify one string (Valid Palindrome); DFS to enumerate every \
+      partition (Palindrome Partitioning); DP to minimize cuts or count partitions (Palindrome \
+      Partitioning II).
+      - "Tree" → BFS for level order, shallowest depth or right-side view (Level-Order Traversal); \
+      DFS for sums, heights, paths and anything not level-related (Max Depth).
+      - "Parentheses" → Stack: last opened closes first (LIFO). (Valid Parentheses)
+      - "Next greater/smaller", "warmer day" → Monotonic Stack: each answer pops out in O(1) \
+      amortized. (Next Greater Element II)
+      - "Subarray" → Sliding Window for a fixed size or monotonic constraint; Prefix Sum for range \
+      sums; hash map of prefix sums for "sum equals target" (Continuous Subarray Sum).
+      - "Max subarray" → Kadane's (greedy): at each index extend the run or restart.
+      - "Two sum / K sum" → Two Pointers on a sorted array, each move raises or lowers the sum; use a \
+      hash map instead when the input is unsorted and original indices are needed.
+      - "Max/longest sequence" → DP or DFS with memoization when each position depends on earlier \
+      ones (Longest Increasing Subsequence); Monotonic Deque for the max within a sliding window \
+      (Sliding Window Maximum).
+      - "Minimum/shortest" → BFS for fewest edges in an unweighted graph; Dijkstra for non-negative \
+      edge weights; DP/DFS for cumulative cost on a grid or sequence (Minimum Path Sum).
+      - "Partition/split" → DFS over split points; memoize repeated suffixes. (Decode Ways)
+      - "Subsequence" → DP / DFS with memoization: pick or skip each index, overlapping subproblems.
+      - "All combinations/permutations/subsets", "generate every" → Backtracking: choose, recurse, \
+      undo. (Permutations, Subsets)
+      - "Matrix"/grid → it's a graph: BFS/DFS for connectivity, flood fill or region counting \
+      (Number of Islands); DP for optimization where each cell builds on neighbors (Maximal Square).
+      - "Jump" → Greedy when "always reach as far as possible" is provably optimal (Jump Game); for \
+      the minimum number of jumps use greedy by reachable range or DP (Jump Game II).
+
+      Formatting: write math as plain text — O(n log k), k ≤ n, x^2 — never LaTeX or $…$.
+
       Answer in this structure. Skip a section only if the transcript shows it is already done:
 
       **Clarify** — 3–5 short questions to ask now, most important first: input size and constraints, \
@@ -66,12 +113,29 @@ nonisolated struct AssistantPromptTemplate: Identifiable, Equatable, Sendable {
       vs. extra space, output format, multiple valid answers. If the interviewer already answered some, \
       list them as confirmed assumptions instead.
 
-      **Approach** — one "Say:" line I can speak to explain the core idea. Then brute force and optimal \
-      as one bullet each, with time and space complexity.
+      **Approach** — start with the cue you spotted and the technique it points to (e.g. "starts with" \
+      → Trie). Then a "Say:" line — at most two spoken sentences, under 40 words — that reasons it out \
+      in my own words, \
+      as if I'm working it out on the spot from the problem's wording — never cite LeetCode problem names or numbers, and don't \
+      say "this is a classic X problem". Then brute force and optimal as one bullet each, with time \
+      and space complexity.
 
-      **Code** — one complete, runnable solution in the language being used (default: Python 3). \
-      Interview style: descriptive names, no unnecessary classes or imports beyond what the platform \
-      expects, and short comments on the key steps explaining *why*, so I can narrate while typing. \
+      **Code** — one complete, runnable solution in the language being used (default: Python 3), \
+      written the way a strong candidate would type it live — not a polished, memorized editorial:
+      - Plain, explicit logic I can explain line by line. Prefer a clear loop over clever one-liners, \
+      golfed tricks or library shortcuts that hide the idea (e.g. no heapq.nsmallest when the point is \
+      to show the heap).
+      - Names that come from this problem's wording (points, distance, waiting_days), not stock \
+      editorial names like res, dp, dummy or ans unless they're genuinely clearest. Don't reuse \
+      LeetCode's official function names (kClosest, twoSum, lengthOfLongestSubstring); name it from the \
+      problem as described (closest_points). Use a plain function unless the interviewer set up a \
+      class or signature — then use exactly theirs.
+      - Build in what we agreed in the conversation: the clarified assumptions and edge cases show up \
+      as simple guard clauses where they naturally belong.
+      - At most about five short comments that sound like me thinking aloud while typing ("# keep \
+      only the k closest so far"), not textbook explanations or a comment on every line.
+      - No docstrings, typing-import boilerplate, example usage or test harness — only the code I'd \
+      actually type into the shared editor.
       Use exactly one code block.
 
       **Test** — a quick dry run on one example, then the important edge cases with expected output.
@@ -83,7 +147,8 @@ nonisolated struct AssistantPromptTemplate: Identifiable, Equatable, Sendable {
       If the interviewer gives a hint, changes a constraint, asks for a different approach or points out \
       a bug, update the approach and the code to match and say what changed. Keep prose minimal — the \
       code block matters most.
-      """
+      """,
+    recognitionHints: codingHints
   )
 
   // MARK: - RRK: AI Engineer
@@ -123,8 +188,10 @@ nonisolated struct AssistantPromptTemplate: Identifiable, Equatable, Sendable {
       and a short sketch or pseudo-code if it helps. For system-design questions use: requirements → \
       architecture → data and evaluation → scaling and cost → risks.
 
-      Be technically precise. When the answer depends on context, say what it depends on.
-      """
+      Be technically precise. When the answer depends on context, say what it depends on. Write math \
+      as plain text, never LaTeX or $…$.
+      """,
+    recognitionHints: aiEngineeringHints
   )
 
   // MARK: - Client Meeting
@@ -177,4 +244,41 @@ nonisolated struct AssistantPromptTemplate: Identifiable, Equatable, Sendable {
       Tone: candid, supportive and human. Keep it short — this is a conversation, not a presentation.
       """
   )
+
+  // MARK: - Recognition Hints
+
+  static let codingHints = [
+    "\"try\" / \"tree\" (storing words or prefixes) → trie",
+    "\"two some\", \"to sum\", \"three some\" → Two Sum, 3Sum",
+    "\"hip\", \"min hip\", \"max hip\" → heap, min-heap, max-heap",
+    "\"cue\", \"Q\" → queue; \"deck\", \"DQ\" → deque",
+    "\"link list\", \"linked lest\" → linked list",
+    "\"a ray\", \"sub array\", \"sub string\" → array, subarray, substring",
+    "\"O of N\", \"big O of N\", \"N log N\", \"N squared\" → O(n), O(n log n), O(n²)",
+    "\"B F S\", \"D F S\", \"beef s\" → BFS, DFS",
+    "\"D P\", \"memorization\" → DP (dynamic programming), memoization",
+    "\"back tracking\", \"two pointer\", \"sliding window\" → backtracking, two pointers, sliding window",
+    "\"B S T\", \"be is tea\" → BST (binary search tree)",
+    "\"dike stra\", \"dykstra\" → Dijkstra; \"union find\" → Union-Find",
+    "\"L R U\" → LRU cache; \"lead code\" → LeetCode",
+    "\"hashed map\", \"hash said\" → hash map, hash set",
+    "\"in place\" → in-place; \"null\"/\"none\" → null / None",
+  ]
+
+  static let aiEngineeringHints = [
+    "\"rag\", \"rack\" → RAG (retrieval-augmented generation)",
+    "\"Laura\", \"lora\", \"Q Laura\", \"cue Laura\" → LoRA, QLoRA",
+    "\"elm\", \"L L M\" → LLM",
+    "\"lang chain\", \"llama index\" → LangChain, LlamaIndex",
+    "\"BM 25\", \"re ranker\" → BM25, reranker",
+    "\"D P O\", \"R L H F\", \"S F T\", \"P P O\" → DPO, RLHF, SFT, PPO",
+    "\"KV cash\", \"cash\" (inference) → KV cache, cache",
+    "\"four bit\", \"int eight\", \"int four\" → 4-bit, INT8, INT4",
+    "\"V L L M\", \"tensor RT\" → vLLM, TensorRT",
+    "\"face\", \"fays\" (vector index) → FAISS; \"we've eight\" → Weaviate",
+    "\"pie torch\", \"hugging face\" → PyTorch, Hugging Face",
+    "\"M C P\" → MCP (Model Context Protocol); \"LLM as a judge\" → LLM-as-judge",
+    "\"few shot\", \"chain of thought\", \"fine tune\" → few-shot, chain-of-thought, fine-tune",
+    "\"H 100\", \"P 99\" → H100, p99",
+  ]
 }

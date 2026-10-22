@@ -27,10 +27,17 @@ struct AlwaysOnRootView: View {
     }
     .padding(.horizontal, panel.isDocked ? AlwaysOnPanelController.dockFlare : 0)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    // Without blur, a tight dark halo keeps the panel's text readable over any window.
+    .compositingGroup()
+    .shadow(color: .black.opacity(style.isSeeThrough ? 0.9 : 0), radius: 1.2)
     .background {
-      ZStack {
-        GlassBackground()
+      if style.isSeeThrough {
         Color.black.opacity(style.tintOpacity)
+      } else {
+        ZStack {
+          GlassBackground()
+          Color.black.opacity(style.tintOpacity)
+        }
       }
     }
     .clipShape(shape)
@@ -40,7 +47,7 @@ struct AlwaysOnRootView: View {
         lineWidth: panel.isNearDock ? 1.5 : 1
       )
     }
-    .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+    .shadow(color: .black.opacity(style.isSeeThrough ? 0.12 : 0.35), radius: 16, y: 8)
     .padding(panel.contentInsets)
     .scaleEffect(panel.isPresented ? 1 : 0.94, anchor: .top)
     .opacity(panel.isPresented ? 1 : 0)
@@ -116,18 +123,14 @@ private struct AlwaysOnHeaderView: View {
   var body: some View {
     HStack(spacing: 10) {
       LiveStatusBadge()
+        .layoutPriority(1)
 
-      ForEach(AudioSource.allCases.filter(state.activeSources.contains), id: \.self) { source in
-        HStack(spacing: 4) {
-          Text(AlwaysOnStyle.label(for: source))
-            .font(.system(size: 9, weight: .bold))
-            .tracking(0.5)
-            .foregroundStyle(style.color(for: source))
-          SourceLevelMeter(level: state.levels[source] ?? 0, color: style.color(for: source))
-        }
+      HStack(spacing: 6) {
+        DeviceChip(source: .microphone, style: style)
+        DeviceChip(source: .systemAudio, style: style)
       }
 
-      Spacer(minLength: 8)
+      Spacer(minLength: 6)
 
       HStack(spacing: 2) {
         PanelIconButton(
@@ -138,6 +141,15 @@ private struct AlwaysOnHeaderView: View {
 
         PanelIconButton(systemName: "eraser", help: "Clear transcript") {
           state.clearTranscript()
+        }
+
+        PanelIconButton(
+          systemName: style.isSeeThrough ? "eye.fill" : "eye",
+          help: style.isSeeThrough ? "Switch to frosted background" : "See-through background",
+          tint: style.isSeeThrough ? .notchBlue : .white
+        ) {
+          let settings = AssistantSettings.shared
+          settings.panelBackground = settings.panelBackground == .frosted ? .seeThrough : .frosted
         }
 
         if !panel.isDocked {
@@ -154,6 +166,8 @@ private struct AlwaysOnHeaderView: View {
           AlwaysOnController.shared.stop()
         }
       }
+      .fixedSize()
+      .layoutPriority(2)
     }
     .padding(.horizontal, 12)
     .frame(height: 36)

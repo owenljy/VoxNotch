@@ -128,9 +128,9 @@ actor LiveTranscriber {
   }
 
   /// Finalize every in-progress utterance now (used when the user asks the AI mid-sentence).
-  func flush() {
+  func flush(source only: AudioSource? = nil) {
     let now = clock.now
-    for source in Array(pipelines.keys) {
+    for source in Array(pipelines.keys) where only == nil || only == source {
       guard var pipeline = pipelines[source] else { continue }
       let tail = pipeline.pending
       pipeline.pending = []

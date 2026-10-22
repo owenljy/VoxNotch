@@ -63,6 +63,8 @@ final class AssistantService {
 
     let messages = AssistantPromptBuilder.messages(
       systemPrompt: settings.systemPrompt,
+      recognitionHints: settings.selectedTemplate.recognitionHints,
+      customTerms: settings.customTermList,
       transcript: state.displayRows,
       previousAnswers: settings.includePreviousAnswers ? state.answers : [],
       trigger: trigger,

@@ -50,6 +50,10 @@ final class AlwaysOnHistoryStore {
   private let settings: any AlwaysOnHistorySettingsProviding
   private let logger = Logger(subsystem: "com.voxnotch", category: "AlwaysOnHistoryStore")
 
+  /// Tail of the write chain. Writes run strictly in call order, so a segment or
+  /// answer can never reach the database before its session row (FOREIGN KEY).
+  private var lastWrite: Task<Void, Never>?
+
   init(
     databaseManager: (any AlwaysOnDatabaseWriting)? = nil,
     settings: (any AlwaysOnHistorySettingsProviding)? = nil
@@ -69,15 +73,9 @@ final class AlwaysOnHistoryStore {
     let record = AlwaysOnSessionRecord(
       id: id, startedAt: startedAt, endedAt: nil, sources: sourceString, title: nil, closedCleanly: false
     )
-    return Task { [databaseAccess, logger] in
-      do {
-        _ = try await databaseAccess.write { db in
-          var row = record
-          try row.insert(db)
-        }
-      } catch {
-        logger.error("Failed to save Always-On session: \(error.localizedDescription, privacy: .public)")
-      }
+    return enqueueWrite("session") { db in
+      var row = record
+      try row.save(db)
     }
   }
 
@@ -87,17 +85,11 @@ final class AlwaysOnHistoryStore {
   /// row was never written this is a harmless no-op.
   @discardableResult
   func endSession(id: String, endedAt: Date, cleanly: Bool) -> Task<Void, Never> {
-    Task { [databaseAccess, logger] in
-      do {
-        _ = try await databaseAccess.write { db in
-          guard var row = try AlwaysOnSessionRecord.fetchOne(db, key: id) else { return }
-          row.endedAt = endedAt
-          if cleanly { row.closedCleanly = true }
-          try row.update(db)
-        }
-      } catch {
-        logger.error("Failed to close Always-On session: \(error.localizedDescription, privacy: .public)")
-      }
+    enqueueWrite("session end") { db in
+      guard var row = try AlwaysOnSessionRecord.fetchOne(db, key: id) else { return }
+      row.endedAt = endedAt
+      if cleanly { row.closedCleanly = true }
+      try row.update(db)
     }
   }
 
@@ -117,15 +109,10 @@ final class AlwaysOnHistoryStore {
       startedAt: segment.startedAt,
       endedAt: segment.endedAt
     )
-    return Task { [databaseAccess, logger] in
-      do {
-        _ = try await databaseAccess.write { db in
-          var row = record
-          try row.save(db)
-        }
-      } catch {
-        logger.error("Failed to save Always-On segment: \(error.localizedDescription, privacy: .public)")
-      }
+    return enqueueWrite("segment") { db in
+      try Self.ensureSession(sessionID, startedAt: record.startedAt, in: db)
+      var row = record
+      try row.save(db)
     }
   }
 
@@ -166,17 +153,39 @@ final class AlwaysOnHistoryStore {
       createdAt: answer.createdAt,
       firstTokenLatencyMs: answer.firstTokenLatency?.milliseconds
     )
-    return Task { [databaseAccess, logger] in
+    return enqueueWrite("answer") { db in
+      try Self.ensureSession(sessionID, startedAt: record.createdAt, in: db)
+      var row = record
+      try row.save(db)
+    }
+  }
+
+  // MARK: Write Ordering
+
+  private func enqueueWrite(
+    _ label: String,
+    _ work: @escaping @Sendable (Database) throws -> Void
+  ) -> Task<Void, Never> {
+    let previous = lastWrite
+    let task = Task { [databaseAccess, logger] in
+      await previous?.value
       do {
-        _ = try await databaseAccess.write { db in
-          guard try AlwaysOnSessionRecord.fetchOne(db, key: sessionID) != nil else { return }
-          var row = record
-          try row.save(db)
-        }
+        try await databaseAccess.write { db in try work(db) }
       } catch {
-        logger.error("Failed to save Always-On answer: \(error.localizedDescription, privacy: .public)")
+        logger.error("Failed to save Always-On \(label, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
+    lastWrite = task
+    return task
+  }
+
+  /// Creates a placeholder session row when history saving was switched on mid-session.
+  private nonisolated static func ensureSession(_ id: String, startedAt: Date, in db: Database) throws {
+    guard try AlwaysOnSessionRecord.fetchOne(db, key: id) == nil else { return }
+    var session = AlwaysOnSessionRecord(
+      id: id, startedAt: startedAt, endedAt: nil, sources: "", title: nil, closedCleanly: false
+    )
+    try session.insert(db)
   }
 
   // MARK: Reading & Deletion

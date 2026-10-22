@@ -50,4 +50,16 @@ final class MarkdownBlocksTests: XCTestCase {
     XCTAssertEqual(MarkdownBlocks.closingOpenMarkers("```sql\nSELECT 1"), "```sql\nSELECT 1\n```")
     XCTAssertEqual(MarkdownBlocks.closingOpenMarkers("**done** and fine"), "**done** and fine")
   }
+
+  func testPlainMathConvertsInlineLatex() {
+    XCTAssertEqual(MarkdownBlocks.plainMath("Time is $O(N \\log N)$ overall."), "Time is O(N log N) overall.")
+    XCTAssertEqual(MarkdownBlocks.plainMath("Keep a heap of size $k$ where $k \\le N$."), "Keep a heap of size k where k ≤ N.")
+    XCTAssertEqual(MarkdownBlocks.plainMath("Distance is $x^2 + y^2$"), "Distance is x² + y²")
+  }
+
+  func testPlainMathLeavesCurrencyAndCodeAlone() {
+    XCTAssertEqual(MarkdownBlocks.plainMath("It costs $5 and $10 per seat."), "It costs $5 and $10 per seat.")
+    XCTAssertEqual(MarkdownBlocks.plainMath("Run `echo $HOME$` then $N$"), "Run `echo $HOME$` then N")
+    XCTAssertEqual(MarkdownBlocks.plainMath("```bash\necho $A$\n```"), "```bash\necho $A$\n```")
+  }
 }

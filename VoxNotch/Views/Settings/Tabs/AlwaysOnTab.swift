@@ -20,6 +20,7 @@ struct AlwaysOnTab: View {
     Form {
       sessionSection
       promptSection
+      vocabularySection
       answersSection
       sourcesSection
       appearanceSection
@@ -164,7 +165,7 @@ struct AlwaysOnTab: View {
         }
       }
 
-      PromptEditorView(text: $settings.systemPrompt)
+      PromptEditorView(text: $settings.systemPrompt, showsToneHelpers: false)
         .id(settings.promptTemplateID)
 
       HStack {
@@ -184,27 +185,86 @@ struct AlwaysOnTab: View {
     }
   }
 
+  // MARK: - Vocabulary
+
+  private var vocabularySection: some View {
+    Section {
+      ZStack(alignment: .topLeading) {
+        TextEditor(text: $settings.customTerms)
+          .font(.body)
+          .frame(minHeight: 64)
+          .scrollContentBackground(.hidden)
+        if settings.customTerms.isEmpty {
+          Text("e.g. Kubernetes, Acme Corp, Project Atlas, pgvector")
+            .foregroundStyle(.tertiary)
+            .padding(.top, 1)
+            .padding(.leading, 5)
+            .allowsHitTesting(false)
+        }
+      }
+
+      let hints = settings.selectedTemplate.recognitionHints
+      if hints.isEmpty {
+        Text("“\(settings.selectedTemplate.name)” has no built-in mishearing hints.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      } else {
+        DisclosureGroup("Built-in hints for “\(settings.selectedTemplate.name)” (\(hints.count))") {
+          VStack(alignment: .leading, spacing: 3) {
+            ForEach(hints, id: \.self) { hint in
+              Text(hint)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.vertical, 4)
+        }
+      }
+    } header: {
+      Text("Vocabulary")
+    } footer: {
+      Text("Speech recognition can't tell words that sound alike apart (trie vs. try), so these hints are sent to the AI, which corrects them from context. Add names, products and jargon from your work, separated by commas or new lines.")
+    }
+  }
+
   // MARK: - Appearance
 
   private var appearanceSection: some View {
     Section {
+      Text("Transcript (top)")
+        .font(.subheadline.weight(.semibold))
       ColorPicker("Text color", selection: hexBinding(\.textColorHex, fallback: .white), supportsOpacity: false)
+      fontSizeRow(value: $settings.fontSize)
       ColorPicker("“Me” label", selection: hexBinding(\.meColorHex, fallback: .notchGreen), supportsOpacity: false)
       ColorPicker("“Them” label", selection: hexBinding(\.themColorHex, fallback: .notchBlue), supportsOpacity: false)
 
+      Text("AI answer (bottom)")
+        .font(.subheadline.weight(.semibold))
+        .padding(.top, 4)
+      ColorPicker("Text color", selection: hexBinding(\.answerTextColorHex, fallback: .white), supportsOpacity: false)
+      fontSizeRow(value: $settings.answerFontSize)
+
+      Text("Panel")
+        .font(.subheadline.weight(.semibold))
+        .padding(.top, 4)
+
+      Picker(selection: $settings.panelBackground) {
+        Text("Frosted").tag(AssistantSettings.PanelBackground.frosted)
+        Text("See-through").tag(AssistantSettings.PanelBackground.seeThrough)
+      } label: {
+        InfoLabel(
+          title: "Background",
+          tooltip: "Frosted blurs what's behind the panel. See-through keeps windows behind it readable (e.g. your code editor) with only a light tint. Toggle it from the eye button in the panel."
+        )
+      }
+      .pickerStyle(.segmented)
+
       LabeledContent("Background tint") {
         HStack {
-          Slider(value: $settings.backgroundOpacity, in: 0...0.9)
-          Text("\(Int((settings.backgroundOpacity * 100).rounded()))%")
-            .monospacedDigit()
-            .frame(width: 36, alignment: .trailing)
-        }
-      }
-
-      LabeledContent("Text size") {
-        HStack {
-          Slider(value: $settings.fontSize, in: 11...18, step: 1)
-          Text("\(Int(settings.fontSize)) pt")
+          Slider(value: $settings.activeTintOpacity, in: 0...0.9)
+          Text("\(Int((settings.activeTintOpacity * 100).rounded()))%")
             .monospacedDigit()
             .frame(width: 36, alignment: .trailing)
         }
@@ -223,6 +283,17 @@ struct AlwaysOnTab: View {
     }
   }
 
+  private func fontSizeRow(value: Binding<Double>) -> some View {
+    LabeledContent("Text size") {
+      HStack {
+        Slider(value: value, in: 11...20, step: 1)
+        Text("\(Int(value.wrappedValue)) pt")
+          .monospacedDigit()
+          .frame(width: 36, alignment: .trailing)
+      }
+    }
+  }
+
   private func hexBinding(_ keyPath: ReferenceWritableKeyPath<AssistantSettings, String>, fallback: Color) -> Binding<Color> {
     Binding(
       get: { Color(hex: settings[keyPath: keyPath]) ?? fallback },
@@ -233,9 +304,12 @@ struct AlwaysOnTab: View {
   private func resetAppearance() {
     typealias Defaults = AssistantSettings.Defaults
     settings.textColorHex = Defaults.textColorHex
+    settings.answerTextColorHex = Defaults.textColorHex
+    settings.answerFontSize = Defaults.fontSize
     settings.meColorHex = Defaults.meColorHex
     settings.themColorHex = Defaults.themColorHex
     settings.backgroundOpacity = Defaults.backgroundOpacity
+    settings.seeThroughOpacity = Defaults.seeThroughOpacity
     settings.fontSize = Defaults.fontSize
   }
 }
@@ -255,6 +329,10 @@ private struct AppearancePreview: View {
     segment(.microphone, "I'd start with the funnel data."),
   ]
 
+  private static let codeBehind = (1...12)
+    .map { "\($0)  def two_sum(nums: list[int], target: int) -> list[int]:  # seen = {}" }
+    .joined(separator: "\n")
+
   var body: some View {
     ZStack {
       // Stand-in for whatever is on screen behind the panel.
@@ -263,19 +341,30 @@ private struct AppearancePreview: View {
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
+      Text(Self.codeBehind)
+        .font(.system(size: 12, design: .monospaced))
+        .foregroundStyle(.white.opacity(0.9))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(10)
 
       VStack(alignment: .leading, spacing: 8) {
         ForEach(Self.rows) { TranscriptRowView(segment: $0, style: style) }
         Rectangle().fill(Color.white.opacity(0.1)).frame(height: 1)
         Text(try! AttributedString(markdown: "**Say:** I'd compare activation before and after the redesign."))
-          .font(.system(size: style.fontSize))
-          .foregroundStyle(style.text)
+          .font(.system(size: style.answerFontSize))
+          .foregroundStyle(style.answerText)
       }
       .padding(14)
+      .compositingGroup()
+      .shadow(color: .black.opacity(style.isSeeThrough ? 0.9 : 0), radius: 1.2)
       .background {
-        ZStack {
-          Rectangle().fill(.ultraThinMaterial)
+        if style.isSeeThrough {
           Color.black.opacity(style.tintOpacity)
+        } else {
+          ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            Color.black.opacity(style.tintOpacity)
+          }
         }
       }
       .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

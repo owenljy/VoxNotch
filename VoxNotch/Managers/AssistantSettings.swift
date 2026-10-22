@@ -23,9 +23,13 @@ final class AssistantSettings {
     static let temperature = "assistant.temperature"
     static let maxTokens = "assistant.maxTokens"
     static let textColorHex = "assistant.textColorHex"
+    static let answerTextColorHex = "assistant.answerTextColorHex"
+    static let answerFontSize = "assistant.answerFontSize"
     static let meColorHex = "assistant.meColorHex"
     static let themColorHex = "assistant.themColorHex"
     static let backgroundOpacity = "assistant.backgroundOpacity"
+    static let panelBackground = "assistant.panelBackground"
+    static let seeThroughOpacity = "assistant.seeThroughOpacity"
     static let fontSize = "assistant.fontSize"
     static let transcriptFraction = "assistant.transcriptFraction"
     static let panelWidth = "assistant.panelWidth"
@@ -38,6 +42,7 @@ final class AssistantSettings {
     static let promptOverrides = "assistant.promptOverrides"
     static let contextWindowMinutes = "assistant.contextWindowMinutes"
     static let includePreviousAnswers = "assistant.includePreviousAnswers"
+    static let customTerms = "assistant.customTerms"
     static let useMicrophone = "assistant.useMicrophone"
     static let useSystemAudio = "assistant.useSystemAudio"
     static let suppressEcho = "assistant.suppressEcho"
@@ -63,6 +68,7 @@ final class AssistantSettings {
     static let meColorHex = "#4DD68F"
     static let themColorHex = "#66B8FF"
     static let backgroundOpacity = 0.55
+    static let seeThroughOpacity = 0.25
     static let fontSize = 13.0
     static let transcriptFraction = 0.5
     static let panelWidth = 560.0
@@ -90,9 +96,23 @@ final class AssistantSettings {
     didSet { UserDefaults.standard.set(maxTokens, forKey: Keys.maxTokens) }
   }
 
+  /// Read from the Keychain on first use, never at launch: with ad-hoc signed builds a
+  /// changed signature makes macOS show a blocking Keychain prompt on access.
   var apiKey: String {
-    didSet { KeychainStore.set(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), for: Self.apiKeyAccount) }
+    get {
+      access(keyPath: \.apiKey)
+      if let cachedAPIKey { return cachedAPIKey }
+      let stored = KeychainStore.string(for: Self.apiKeyAccount) ?? ""
+      cachedAPIKey = stored
+      return stored
+    }
+    set {
+      withMutation(keyPath: \.apiKey) { cachedAPIKey = newValue }
+      KeychainStore.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), for: Self.apiKeyAccount)
+    }
   }
+
+  @ObservationIgnored private var cachedAPIKey: String?
 
   // MARK: - Assistant
 
@@ -129,6 +149,19 @@ final class AssistantSettings {
   /// Minutes of transcript sent with each request; 0 sends the entire session.
   var contextWindowMinutes: Double {
     didSet { UserDefaults.standard.set(contextWindowMinutes, forKey: Keys.contextWindowMinutes) }
+  }
+
+  /// Domain words (names, products, jargon) the AI should expect; free text,
+  /// separated by commas or new lines.
+  var customTerms: String {
+    didSet { UserDefaults.standard.set(customTerms, forKey: Keys.customTerms) }
+  }
+
+  var customTermList: [String] {
+    customTerms
+      .components(separatedBy: CharacterSet(charactersIn: ",\n;"))
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty }
   }
 
   /// Include earlier AI answers so follow-ups build on what was already suggested.
@@ -217,8 +250,14 @@ final class AssistantSettings {
 
   // MARK: - Appearance
 
+  /// Transcript (top pane) text color.
   var textColorHex: String {
     didSet { UserDefaults.standard.set(textColorHex, forKey: Keys.textColorHex) }
+  }
+
+  /// AI answer (bottom pane) text color.
+  var answerTextColorHex: String {
+    didSet { UserDefaults.standard.set(answerTextColorHex, forKey: Keys.answerTextColorHex) }
   }
 
   var meColorHex: String {
@@ -234,8 +273,38 @@ final class AssistantSettings {
     didSet { UserDefaults.standard.set(backgroundOpacity, forKey: Keys.backgroundOpacity) }
   }
 
+  enum PanelBackground: String, CaseIterable, Sendable {
+    /// Blurs whatever is behind the panel.
+    case frosted
+    /// No blur: windows behind stay readable through a light tint.
+    case seeThrough
+  }
+
+  var panelBackground: PanelBackground {
+    didSet { UserDefaults.standard.set(panelBackground.rawValue, forKey: Keys.panelBackground) }
+  }
+
+  /// Tint used in see-through mode (kept separate from the frosted tint).
+  var seeThroughOpacity: Double {
+    didSet { UserDefaults.standard.set(seeThroughOpacity, forKey: Keys.seeThroughOpacity) }
+  }
+
+  /// Tint for the current background mode.
+  var activeTintOpacity: Double {
+    get { panelBackground == .frosted ? backgroundOpacity : seeThroughOpacity }
+    set {
+      if panelBackground == .frosted { backgroundOpacity = newValue } else { seeThroughOpacity = newValue }
+    }
+  }
+
+  /// Transcript (top pane) text size.
   var fontSize: Double {
     didSet { UserDefaults.standard.set(fontSize, forKey: Keys.fontSize) }
+  }
+
+  /// AI answer (bottom pane) text size.
+  var answerFontSize: Double {
+    didSet { UserDefaults.standard.set(answerFontSize, forKey: Keys.answerFontSize) }
   }
 
   // MARK: - Panel Layout
@@ -280,10 +349,12 @@ final class AssistantSettings {
     )
   }
 
-  /// API key is optional so keyless local servers (Ollama, LM Studio) work.
+  /// API key is optional so keyless local servers (Ollama, LM Studio) work, and is not
+  /// read here so UI checks never touch the Keychain.
   var isProviderConfigured: Bool {
-    let config = providerConfig
-    return !config.model.isEmpty && (try? config.endpoint("/chat/completions")) != nil
+    let endpoint = OpenAICompatibleConfig(baseURL: baseURL, apiKey: "", model: "", temperature: 0, maxTokens: 0)
+    return !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && (try? endpoint.endpoint("/chat/completions")) != nil
   }
 
   // MARK: - Init
@@ -294,7 +365,6 @@ final class AssistantSettings {
     model = defaults.string(forKey: Keys.model) ?? Defaults.model
     temperature = defaults.object(forKey: Keys.temperature) as? Double ?? Defaults.temperature
     maxTokens = defaults.object(forKey: Keys.maxTokens) as? Int ?? Defaults.maxTokens
-    apiKey = KeychainStore.string(for: Self.apiKeyAccount) ?? ""
 
     promptTemplateID = defaults.string(forKey: Keys.promptTemplateID) ?? AssistantPromptTemplate.general.id
     var overrides = defaults.dictionary(forKey: Keys.promptOverrides) as? [String: String] ?? [:]
@@ -308,6 +378,7 @@ final class AssistantSettings {
     promptOverrides = overrides
     contextWindowMinutes = defaults.object(forKey: Keys.contextWindowMinutes) as? Double ?? Defaults.contextWindowMinutes
     includePreviousAnswers = defaults.object(forKey: Keys.includePreviousAnswers) as? Bool ?? true
+    customTerms = defaults.string(forKey: Keys.customTerms) ?? ""
 
     useMicrophone = defaults.object(forKey: Keys.useMicrophone) as? Bool ?? true
     useSystemAudio = defaults.object(forKey: Keys.useSystemAudio) as? Bool ?? true
@@ -323,11 +394,18 @@ final class AssistantSettings {
     saveHistory = defaults.object(forKey: Keys.saveHistory) as? Bool ?? true
     historyRetentionDays = defaults.object(forKey: Keys.historyRetentionDays) as? Int ?? 0
 
-    textColorHex = defaults.string(forKey: Keys.textColorHex) ?? Defaults.textColorHex
+    let transcriptColor = defaults.string(forKey: Keys.textColorHex) ?? Defaults.textColorHex
+    textColorHex = transcriptColor
+    // Existing users start with the answer pane matching their current transcript style.
+    answerTextColorHex = defaults.string(forKey: Keys.answerTextColorHex) ?? transcriptColor
     meColorHex = defaults.string(forKey: Keys.meColorHex) ?? Defaults.meColorHex
     themColorHex = defaults.string(forKey: Keys.themColorHex) ?? Defaults.themColorHex
     backgroundOpacity = defaults.object(forKey: Keys.backgroundOpacity) as? Double ?? Defaults.backgroundOpacity
-    fontSize = defaults.object(forKey: Keys.fontSize) as? Double ?? Defaults.fontSize
+    panelBackground = defaults.string(forKey: Keys.panelBackground).flatMap(PanelBackground.init) ?? .frosted
+    seeThroughOpacity = defaults.object(forKey: Keys.seeThroughOpacity) as? Double ?? Defaults.seeThroughOpacity
+    let transcriptSize = defaults.object(forKey: Keys.fontSize) as? Double ?? Defaults.fontSize
+    fontSize = transcriptSize
+    answerFontSize = defaults.object(forKey: Keys.answerFontSize) as? Double ?? transcriptSize
     transcriptFraction = defaults.object(forKey: Keys.transcriptFraction) as? Double ?? Defaults.transcriptFraction
     panelWidth = defaults.object(forKey: Keys.panelWidth) as? Double ?? Defaults.panelWidth
     panelHeight = defaults.object(forKey: Keys.panelHeight) as? Double ?? Defaults.panelHeight

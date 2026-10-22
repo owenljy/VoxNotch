@@ -104,6 +104,11 @@ final class AlwaysOnState {
     revision += 1
   }
 
+  func setSource(_ source: AudioSource, active: Bool) {
+    if active { activeSources.insert(source) } else { activeSources.remove(source) }
+    if !active { partials[source] = nil; levels[source] = nil }
+  }
+
   func clearTranscript() {
     segments = []
     partials = [:]

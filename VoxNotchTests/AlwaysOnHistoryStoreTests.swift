@@ -100,4 +100,50 @@ final class AlwaysOnHistoryStoreTests: XCTestCase {
     let remaining = try await store.sessions()
     XCTAssertEqual(remaining.map(\.id), ["recent"])
   }
+
+  func testWritesKeepCallOrderWithoutAwaitingSessionStart() async throws {
+    let (store, _) = try makeStore()
+    let start = Date(timeIntervalSince1970: 2_000)
+    // Fire-and-forget, exactly like the live controller does.
+    store.startSession(id: "s", sources: [.systemAudio], startedAt: start)
+    var lastWrite: Task<Void, Never>?
+    for index in 0..<20 {
+      lastWrite = store.recordSegment(
+        LiveTranscriptSegment(
+          id: UUID(), source: .systemAudio, text: "line \(index)",
+          startedAt: start.addingTimeInterval(Double(index)), endedAt: start.addingTimeInterval(Double(index) + 0.5), isFinal: true
+        ),
+        sessionID: "s"
+      )
+    }
+    store.endSession(id: "s", endedAt: start.addingTimeInterval(30), cleanly: true)
+    await lastWrite?.value
+    let segments = try await store.segments(for: "s")
+    XCTAssertEqual(segments.count, 20)
+    let sessions = try await store.sessions()
+    XCTAssertEqual(sessions.first?.sources, "systemAudio")
+  }
+
+  func testSegmentAndAnswerCreateSessionWhenSavingTurnedOnMidSession() async throws {
+    let settings = TestSettings()
+    settings.saveHistory = false
+    let (store, _) = try makeStore(settings: settings)
+    let start = Date(timeIntervalSince1970: 3_000)
+    store.startSession(id: "late", sources: [.microphone], startedAt: start)
+
+    settings.saveHistory = true
+    await store.recordSegment(
+      LiveTranscriptSegment(id: UUID(), source: .microphone, text: "after enabling", startedAt: start, endedAt: start, isFinal: true),
+      sessionID: "late"
+    ).value
+    var answer = AssistantAnswer(id: UUID(), createdAt: start.addingTimeInterval(1), trigger: .manual, model: "m")
+    answer.markdown = "ok"
+    answer.status = .done
+    await store.recordAnswer(answer, sessionID: "late").value
+
+    let segmentTexts = try await store.segments(for: "late").map(\.text)
+    let answers = try await store.answers(for: "late")
+    XCTAssertEqual(segmentTexts, ["after enabling"])
+    XCTAssertEqual(answers.count, 1)
+  }
 }

@@ -42,14 +42,22 @@ struct AlwaysOnStyle {
   let me: Color
   let them: Color
   let tintOpacity: Double
+  let isSeeThrough: Bool
+  /// Transcript pane.
   let fontSize: CGFloat
+  /// Answer pane.
+  let answerText: Color
+  let answerFontSize: CGFloat
 
   @MainActor init(settings: AssistantSettings) {
     text = Color(hex: settings.textColorHex) ?? .white
     me = Color(hex: settings.meColorHex) ?? .notchGreen
     them = Color(hex: settings.themColorHex) ?? .notchBlue
-    tintOpacity = settings.backgroundOpacity
+    tintOpacity = settings.activeTintOpacity
+    isSeeThrough = settings.panelBackground == .seeThrough
     fontSize = CGFloat(settings.fontSize)
+    answerText = Color(hex: settings.answerTextColorHex) ?? .white
+    answerFontSize = CGFloat(settings.answerFontSize)
   }
 
   func color(for source: AudioSource) -> Color {

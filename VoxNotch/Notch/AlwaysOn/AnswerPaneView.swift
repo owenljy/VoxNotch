@@ -51,7 +51,7 @@ struct AnswerPaneView: View {
       }
     }
     .font(.system(size: 12))
-    .foregroundStyle(style.text.opacity(0.5))
+    .foregroundStyle(style.answerText.opacity(0.5))
     .multilineTextAlignment(.center)
     .padding(16)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -199,7 +199,7 @@ private struct AnswerBodyView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 10) {
         if answer.markdown.isEmpty, answer.isInProgress {
-          ThinkingIndicator(color: style.text)
+          ThinkingIndicator(color: style.answerText)
         } else {
           StreamingMarkdownView(markdown: answer.markdown, style: style, isStreaming: answer.isInProgress)
         }
@@ -209,7 +209,7 @@ private struct AnswerBodyView: View {
             Image(systemName: "exclamationmark.triangle.fill")
               .foregroundStyle(Color.notchAmber)
             Text(message)
-              .foregroundStyle(style.text.opacity(0.8))
+              .foregroundStyle(style.answerText.opacity(0.8))
               .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             if AssistantSettings.shared.isProviderConfigured {
@@ -244,13 +244,13 @@ private struct StreamingMarkdownView: View {
   let isStreaming: Bool
 
   var body: some View {
-    var blocks = MarkdownBlocks.split(markdown)
+    var blocks = MarkdownBlocks.split(markdown).map(MarkdownBlocks.plainMath)
     if isStreaming, let last = blocks.popLast() {
       blocks.append(MarkdownBlocks.closingOpenMarkers(last))
     }
-    return VStack(alignment: .leading, spacing: style.fontSize * 0.7) {
+    return VStack(alignment: .leading, spacing: style.answerFontSize * 0.7) {
       ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-        MarkdownBlockView(markdown: block, fontSize: style.fontSize, color: style.text)
+        MarkdownBlockView(markdown: block, fontSize: style.answerFontSize, color: style.answerText)
           .equatable()
       }
     }

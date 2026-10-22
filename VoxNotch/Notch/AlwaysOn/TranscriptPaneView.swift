@@ -107,7 +107,9 @@ struct TranscriptRowView: View {
         .font(.system(size: max(style.fontSize - 3.5, 9), weight: .bold))
         .tracking(0.6)
         .foregroundStyle(style.color(for: segment.source))
-        .frame(width: 38, alignment: .leading)
+        .lineLimit(1)
+        .fixedSize()
+        .frame(width: max(38, style.fontSize * 3.2), alignment: .leading)
 
       Text(segment.text)
         .font(.system(size: style.fontSize))

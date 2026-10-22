@@ -7,6 +7,7 @@
 //  to AlwaysOnState, and shows the overlay panel.
 //
 
+import CoreAudio
 import FluidAudio
 import Foundation
 import os
@@ -27,8 +28,8 @@ final class AlwaysOnController {
   private var sessionTask: Task<Void, Never>?
   private var updatesTask: Task<Void, Never>?
   private var levelTask: Task<Void, Never>?
-  private var ingestTasks: [Task<Void, Never>] = []
-  private var sampleContinuations: [AsyncStream<[Float]>.Continuation] = []
+  private var ingestTasks: [AudioSource: Task<Void, Never>] = [:]
+  private var sampleContinuations: [AudioSource: AsyncStream<[Float]>.Continuation] = [:]
 
   private init() {}
 
@@ -56,6 +57,7 @@ final class AlwaysOnController {
     }
 
     state.begin(sources: sources)
+    AudioDeviceMonitor.shared.start()
     state.suppressEcho = settings.suppressEcho
     autoTrigger.reset()
     let sessionID = state.sessionID
@@ -147,6 +149,48 @@ final class AlwaysOnController {
     }
   }
 
+  // MARK: - Devices & Sources (session-only; Settings hold the defaults)
+
+  /// Switch microphones mid-session. Capture is stopped before the device changes,
+  /// because swapping the device under a running tap leaves a stale format converter.
+  func selectMicrophone(_ deviceID: AudioDeviceID?) {
+    let isCapturing = state.status == .running && !state.isPaused && state.activeSources.contains(.microphone)
+    if isCapturing { stopCapture(.microphone) }
+    AudioCaptureManager.shared.selectInputDevice(deviceID)
+    AudioDeviceMonitor.shared.refresh()
+    guard isCapturing, let transcriber else { return }
+    sessionTask = Task {
+      do {
+        try await startCapture(sources: [.microphone], into: transcriber)
+      } catch {
+        logger.error("Microphone restart failed: \(error.localizedDescription, privacy: .public)")
+        state.setSource(.microphone, active: false)
+      }
+    }
+  }
+
+  /// Turn one source on or off for the current session.
+  func setSource(_ source: AudioSource, enabled: Bool) {
+    guard state.status == .running, let transcriber else { return }
+    guard state.activeSources.contains(source) != enabled else { return }
+    state.setSource(source, active: enabled)
+    guard !state.isPaused else { return }
+
+    if enabled {
+      sessionTask = Task {
+        do {
+          try await startCapture(sources: [source], into: transcriber)
+        } catch {
+          logger.error("Could not start \(source.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+          state.setSource(source, active: false)
+        }
+      }
+    } else {
+      stopCapture(source)
+      Task { await transcriber.flush(source: source) }
+    }
+  }
+
   /// Finalize in-progress speech immediately so a manual AI request sees it.
   func flushPendingSpeech() async {
     await transcriber?.flush()
@@ -172,12 +216,12 @@ final class AlwaysOnController {
 
       // ~10s of headroom; oldest audio is dropped only if the pipeline stalls badly.
       let (stream, continuation) = AsyncStream<[Float]>.makeStream(bufferingPolicy: .bufferingNewest(500))
-      sampleContinuations.append(continuation)
-      ingestTasks.append(Task.detached(priority: .userInitiated) {
+      sampleContinuations[source] = continuation
+      ingestTasks[source] = Task.detached(priority: .userInitiated) {
         for await samples in stream {
           await transcriber.ingest(samples, from: source)
         }
-      })
+      }
 
       let onSamples: @Sendable ([Float]) -> Void = { continuation.yield($0) }
       switch source {
@@ -190,12 +234,17 @@ final class AlwaysOnController {
   }
 
   private func stopCapture() {
-    AudioCaptureManager.shared.stopStreaming()
-    SystemAudioCaptureManager.shared.stopStreaming()
-    sampleContinuations.forEach { $0.finish() }
-    sampleContinuations = []
-    ingestTasks.forEach { $0.cancel() }
-    ingestTasks = []
+    AudioSource.allCases.forEach(stopCapture)
+  }
+
+  private func stopCapture(_ source: AudioSource) {
+    switch source {
+    case .microphone: AudioCaptureManager.shared.stopStreaming()
+    case .systemAudio: SystemAudioCaptureManager.shared.stopStreaming()
+    }
+    sampleContinuations.removeValue(forKey: source)?.finish()
+    ingestTasks.removeValue(forKey: source)?.cancel()
+    state.levels[source] = nil
   }
 
   private func startLevelPolling(_ transcriber: LiveTranscriber) {

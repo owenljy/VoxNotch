@@ -59,6 +59,58 @@ nonisolated enum MarkdownBlocks {
     return result
   }
 
+  /// Renders inline LaTeX like `$O(n \\log k)$` or `$N$` as plain text. Leaves currency
+  /// ("$5 and $10"), inline code and fenced code untouched.
+  static func plainMath(_ block: String) -> String {
+    guard block.contains("$"), !block.trimmingCharacters(in: .whitespaces).hasPrefix("```") else { return block }
+    // Even indices are outside `inline code`.
+    return block.components(separatedBy: "`").enumerated().map { index, part in
+      index.isMultiple(of: 2) ? replaceInlineMath(in: part) : part
+    }.joined(separator: "`")
+  }
+
+  private static let inlineMath = try! NSRegularExpression(pattern: #"\$([^$\n]{1,60})\$"#)
+
+  private static func replaceInlineMath(in text: String) -> String {
+    let source = text as NSString
+    var result = ""
+    var cursor = 0
+    for match in inlineMath.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+      let body = source.substring(with: match.range(at: 1))
+      guard looksLikeMath(body) else { continue }
+      result += source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+      result += latexToPlain(body)
+      cursor = match.range.location + match.range.length
+    }
+    return result + source.substring(from: cursor)
+  }
+
+  /// Math has LaTeX markup or is a short spaceless expression; "5 and " (currency) is neither.
+  private static func looksLikeMath(_ body: String) -> Bool {
+    if body.contains("\\") || body.contains("^") || body.contains("_") { return true }
+    let trimmed = body.trimmingCharacters(in: .whitespaces)
+    guard trimmed == body, !trimmed.isEmpty, !trimmed.contains(" ") else { return false }
+    return trimmed.first?.isLetter == true || trimmed.hasPrefix("(")
+  }
+
+  private static let latexSymbols: [(String, String)] = [
+    ("\\log", "log"), ("\\ln", "ln"), ("\\le", "≤"), ("\\leq", "≤"), ("\\ge", "≥"), ("\\geq", "≥"),
+    ("\\neq", "≠"), ("\\ne", "≠"), ("\\times", "×"), ("\\cdot", "·"), ("\\infty", "∞"),
+    ("\\to", "→"), ("\\rightarrow", "→"), ("\\approx", "≈"), ("\\sum", "Σ"), ("\\sqrt", "√"),
+    ("\\left", ""), ("\\right", ""), ("\\,", " "), ("\\;", " "), ("\\ ", " "),
+  ]
+
+  private static func latexToPlain(_ body: String) -> String {
+    var text = body
+    // Longest commands first so \leq isn't eaten by \le.
+    for (command, replacement) in latexSymbols.sorted(by: { $0.0.count > $1.0.count }) {
+      text = text.replacingOccurrences(of: command, with: replacement)
+    }
+    text = text.replacingOccurrences(of: "{", with: "").replacingOccurrences(of: "}", with: "")
+    text = text.replacingOccurrences(of: "^2", with: "²").replacingOccurrences(of: "^3", with: "³")
+    return text.trimmingCharacters(in: .whitespaces)
+  }
+
   private static func continuesList(_ previous: String, with line: Substring) -> Bool {
     guard let firstLine = previous.split(separator: "\n", maxSplits: 1).first, isListItem(firstLine) else {
       return false

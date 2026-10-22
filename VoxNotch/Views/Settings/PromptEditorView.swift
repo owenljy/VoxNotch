@@ -11,6 +11,8 @@ struct PromptEditorView: View {
 
   @Binding var text: String
   var isReadOnly: Bool = false
+  /// Snippet menu for Tone (rewrite) prompts; meaningless for other prompt kinds.
+  var showsToneHelpers: Bool = true
 
   @State private var mode: EditorMode = .edit
 
@@ -31,7 +33,7 @@ struct PromptEditorView: View {
         .pickerStyle(.segmented)
         .frame(width: 140)
 
-        if mode == .edit && !isReadOnly {
+        if mode == .edit && !isReadOnly && showsToneHelpers {
           promptHelpers
         }
 

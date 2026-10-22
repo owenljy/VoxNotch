@@ -25,7 +25,7 @@ final class AssistantPromptBuilderTests: XCTestCase {
     XCTAssertEqual(messages.map(\.role), [.system, .user])
     XCTAssertEqual(messages[0].content, "Be helpful.")
     XCTAssertTrue(messages[1].content.contains("Them: How would you test it?\nMe: Good question."))
-    XCTAssertTrue(messages[1].content.hasSuffix("Help me respond to what they said last."))
+    XCTAssertTrue(messages[1].content.contains("<latest>\nThem: How would you test it?\n</latest>"))
   }
 
   func testEmptySystemPromptFallsBackToDefault() {
@@ -98,5 +98,62 @@ final class AssistantPromptBuilderTests: XCTestCase {
     XCTAssertTrue(AssistantPromptTemplate.codingInterview.prompt.contains("**Clarify**"))
     XCTAssertTrue(AssistantPromptTemplate.codingInterview.prompt.contains("**Code**"))
     XCTAssertTrue(AssistantPromptTemplate.rrkAIEngineer.prompt.contains("Role: **AI Engineer**"))
+    let coding = AssistantPromptTemplate.codingInterview.prompt
+    XCTAssertTrue(coding.contains("Pattern cues"))
+    XCTAssertTrue(coding.contains("\"starts with\" → Trie"))
+    XCTAssertTrue(coding.contains("Monotonic Stack"))
+    XCTAssertFalse(coding.contains("\\\n"), "line continuations must be joined")
+  }
+
+  func testLatestFocusesOnUnansweredQuestionsFromThem() {
+    let old = segment(.systemAudio, "Tell me about yourself.", endedAgo: 120)
+    let mine = segment(.microphone, "I build ML systems.", endedAgo: 100)
+    let q1 = segment(.systemAudio, "How do you evaluate a RAG system?", endedAgo: 30)
+    let q2 = segment(.systemAudio, "And how would you reduce hallucinations?", endedAgo: 10)
+    var answered = AssistantAnswer(id: UUID(), createdAt: now.addingTimeInterval(-90), trigger: .auto, model: "m")
+    answered.markdown = "Intro talk points"
+    answered.status = .done
+
+    let latest = AssistantPromptBuilder.latestLines(transcript: [old, mine, q1, q2], previousAnswers: [answered])
+    XCTAssertEqual(latest, ["Them: How do you evaluate a RAG system?", "Them: And how would you reduce hallucinations?"])
+
+    let content = AssistantPromptBuilder.messages(
+      systemPrompt: "x", transcript: [old, mine, q1, q2], previousAnswers: [answered], trigger: .manual, now: now, window: nil)[1].content
+    XCTAssertTrue(content.contains("<latest>\nThem: How do you evaluate a RAG system?\nThem: And how would you reduce hallucinations?\n</latest>"))
+    XCTAssertTrue(content.hasSuffix("questions unless the latest one refers back to them."))
+    XCTAssertTrue(content.contains("Them: Tell me about yourself."), "full context is still sent")
+  }
+
+  func testLatestFallsBackWhenNothingNewFromThem() {
+    let q = segment(.systemAudio, "Any questions for me?", endedAgo: 60)
+    var answered = AssistantAnswer(id: UUID(), createdAt: now.addingTimeInterval(-30), trigger: .auto, model: "m")
+    answered.markdown = "Ask about the team"
+    answered.status = .done
+    XCTAssertEqual(AssistantPromptBuilder.latestLines(transcript: [q], previousAnswers: [answered]), ["Them: Any questions for me?"])
+    XCTAssertEqual(
+      AssistantPromptBuilder.latestLines(transcript: [segment(.microphone, "Note to self", endedAgo: 5)], previousAnswers: []),
+      ["Me: Note to self"])
+    XCTAssertEqual(AssistantPromptBuilder.latestLines(transcript: [], previousAnswers: []), [])
+  }
+
+  func testRecognitionNotesAreAppendedToSystemPromptOnlyWhenPresent() {
+    let plain = AssistantPromptBuilder.messages(systemPrompt: "Base.", transcript: [], trigger: .manual, now: now, window: nil)
+    XCTAssertEqual(plain[0].content, "Base.")
+
+    let hinted = AssistantPromptBuilder.messages(
+      systemPrompt: "Base.",
+      recognitionHints: AssistantPromptTemplate.codingInterview.recognitionHints,
+      customTerms: ["Acme Corp", "pgvector"],
+      transcript: [segment(.systemAudio, "Can you implement a try?", endedAgo: 2)],
+      trigger: .auto, now: now, window: nil)[0].content
+    XCTAssertTrue(hinted.hasPrefix("Base.\n\nSpeech-recognition notes:"))
+    XCTAssertTrue(hinted.contains("→ trie"))
+    XCTAssertTrue(hinted.hasSuffix("Terms likely to come up (match similar-sounding words to these): Acme Corp, pgvector"))
+  }
+
+  func testCodingAndRRKTemplatesShipHints() {
+    XCTAssertFalse(AssistantPromptTemplate.codingInterview.recognitionHints.isEmpty)
+    XCTAssertTrue(AssistantPromptTemplate.rrkAIEngineer.recognitionHints.contains { $0.contains("LoRA") })
+    XCTAssertTrue(AssistantPromptTemplate.general.recognitionHints.isEmpty)
   }
 }
