@@ -29,6 +29,9 @@ Before publishing, the workflow checks the archived app's version, build number,
 architecture, and resource signature, then mounts the completed DMG read-only and
 repeats those checks on the packaged app. Archive result bundles and full logs
 are retained for seven days, including on failure.
+DMG creation uses `create-dmg --skip-jenkins` to avoid Finder AppleScript timeouts
+in unattended environments. The Applications link remains available; custom
+icon placement is skipped.
 The release uses ad-hoc signing to seal the app bundle but remains unnotarized.
 Developer ID signing and notarization require Apple distribution credentials
 and are not configured by these workflows.
