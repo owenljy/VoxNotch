@@ -30,6 +30,11 @@ jobs:
         with:
           xcode-version: '26.6'
 
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
       - name: Validate release tag
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -38,9 +43,16 @@ jobs:
           import os, pathlib, re
           project = pathlib.Path("VoxNotch.xcodeproj/project.pbxproj").read_text()
           versions = set(re.findall(r"MARKETING_VERSION = ([^;]+);", project))
+          builds = set(re.findall(r"CURRENT_PROJECT_VERSION = ([^;]+);", project))
           tag = os.environ["RELEASE_TAG"]
           if not re.fullmatch(r"v\d+\.\d+\.\d+", tag) or versions != {tag[1:]}:
               raise SystemExit(f"Release tag {tag} does not match project versions {versions}")
+          if len(builds) != 1 or not next(iter(builds)).isdigit():
+              raise SystemExit(f"Inconsistent project build numbers: {builds}")
+          build = next(iter(builds))
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"RELEASE_BUILD={build}\n")
+          print(f"Releasing {tag} ({build})")
           PY
 
       - name: Build Release archive
@@ -52,8 +64,11 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=macOS' \
             -archivePath "$RUNNER_TEMP/VoxNotch.xcarchive" \
+            -resultBundlePath "$RUNNER_TEMP/Archive.xcresult" \
             -disableAutomaticPackageResolution \
             -skipMacroValidation \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -72,7 +87,10 @@ jobs:
             "$RUNNER_TEMP/export/VoxNotch.app"
           codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/export/VoxNotch.app"
           app_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/export/VoxNotch.app/Contents/Info.plist")
+          app_build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/export/VoxNotch.app/Contents/Info.plist")
           test "v$app_version" = "$RELEASE_TAG"
+          test "$app_build" = "$RELEASE_BUILD"
+          test "$(lipo -archs "$RUNNER_TEMP/export/VoxNotch.app/Contents/MacOS/VoxNotch")" = arm64
 
       - name: Create DMG and checksum
         run: |
@@ -87,6 +105,24 @@ jobs:
           cd "$RUNNER_TEMP"
           shasum -a 256 VoxNotch.dmg > VoxNotch.dmg.sha256
 
+      - name: Verify packaged app
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          shasum -a 256 -c VoxNotch.dmg.sha256
+          hdiutil verify VoxNotch.dmg
+          mount_point="$RUNNER_TEMP/release-image"
+          mkdir -p "$mount_point"
+          hdiutil attach VoxNotch.dmg -readonly -nobrowse -mountpoint "$mount_point"
+          trap 'hdiutil detach "$mount_point"' EXIT
+          app="$mount_point/VoxNotch.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          test "v$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$RELEASE_TAG"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = "$RELEASE_BUILD"
+          test "$(lipo -archs "$app/Contents/MacOS/VoxNotch")" = arm64
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -96,11 +132,13 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
 
-      - name: Save archive log
+      - name: Save archive diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: archive-log
-          path: ${{ runner.temp }}/archive.log
+          path: |
+            ${{ runner.temp }}/archive.log
+            ${{ runner.temp }}/Archive.xcresult
           if-no-files-found: ignore
           retention-days: 7

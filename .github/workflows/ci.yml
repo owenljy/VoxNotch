@@ -20,6 +20,10 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '26.6'
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: Build and test locked dependencies
         run: |
           set -o pipefail
@@ -32,6 +36,8 @@ jobs:
             -skipMacroValidation \
             -parallel-testing-enabled NO \
             -resultBundlePath "$RUNNER_TEMP/Tests.xcresult" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee "$RUNNER_TEMP/tests.log"
       - name: Save test results
