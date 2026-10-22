@@ -126,6 +126,9 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
         }
     }
 
+    /// Streaming mode (Always-On): samples go to `onResampledAudioSamples` only.
+    private(set) var isStreaming = false
+
     // MARK: - Audio Level Visualization
 
     private var previousBands = [Float](repeating: 0, count: 6)
@@ -221,6 +224,27 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
         isRecording = true
         recordingStartTime = Date()
         logger.info("Started recording system audio")
+    }
+
+    /// Start continuous capture that delivers 16kHz mono samples to `onSamples` on the audio queue.
+    func startStreaming(onSamples: @escaping @Sendable ([Float]) -> Void) async throws {
+        onResampledAudioSamples = onSamples
+        audioQueue.sync { self.isStreaming = true }
+        do {
+            try await startRecording()
+        } catch {
+            audioQueue.sync { self.isStreaming = false }
+            onResampledAudioSamples = nil
+            throw error
+        }
+    }
+
+    func stopStreaming() {
+        guard isStreaming else { return }
+        cancelRecording()
+        audioQueue.sync { self.isStreaming = false }
+        onResampledAudioSamples = nil
+        logger.info("Stopped streaming system audio")
     }
 
     /// Stop recording and save to file
@@ -348,6 +372,11 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
 
         let frameCount = Int(outputBuffer.frameLength)
         guard error == nil, frameCount > 0, let outputChannelData = outputBuffer.floatChannelData else { return }
+
+        if isStreaming {
+            onResampledAudioSamples?(Array(UnsafeBufferPointer(start: outputChannelData[0], count: frameCount)))
+            return
+        }
 
         // Create resampledBuffer and copy directly from outputBuffer (skip Array intermediate)
         guard let resampledBuffer = AVAudioPCMBuffer(pcmFormat: resampledFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }

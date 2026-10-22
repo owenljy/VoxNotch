@@ -65,6 +65,10 @@ final class NotchManager {
 
   private init() {}
 
+  private static var currentSharingType: NSWindow.SharingType {
+    SettingsManager.shared.hideFromScreenRecording ? .none : .readOnly
+  }
+
   // MARK: - Setup
 
   func setup() {
@@ -85,9 +89,20 @@ final class NotchManager {
     )
     hostingView.frame = NSRect(origin: .zero, size: Self.panelSize)
     panel.contentView = hostingView
+    panel.sharingType = Self.currentSharingType
 
     self.panel = panel
     detectPhysicalNotch()
+
+    NotificationCenter.default.addObserver(
+      forName: .hideFromScreenRecordingChanged,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.panel?.sharingType = Self.currentSharingType
+      }
+    }
 
     // Reposition when displays change.
     NotificationCenter.default.addObserver(

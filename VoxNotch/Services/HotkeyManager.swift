@@ -57,6 +57,15 @@ final class HotkeyManager {
     /// Callback fired when ESC is pressed and useEscToCancel is enabled
     var onEscapeKey: (() -> Void)?
 
+    /// Global key-combo shortcuts. The handler runs synchronously on the main thread
+    /// and returns true to consume the key event, false to let it reach the app.
+    struct RegisteredShortcut {
+        let shortcut: KeyShortcut
+        let handler: () -> Bool
+    }
+
+    var shortcuts: [RegisteredShortcut] = []
+
     /// Whether the hotkey is currently pressed
     private(set) var isHotkeyPressed: Bool = false
 
@@ -255,6 +264,13 @@ final class HotkeyManager {
         if type == .keyDown {
             let flags = event.flags
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+            if let registered = shortcuts.first(where: { $0.shortcut.matches(keyCode: keyCode, flags: flags) }) {
+                let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                if isRepeat || registered.handler() {
+                    return isRepeat ? Unmanaged.passRetained(event) : nil
+                }
+            }
 
             // ESC key (53) — cancel active recording/session if enabled
             if keyCode == 53 && SettingsManager.shared.useEscToCancel {

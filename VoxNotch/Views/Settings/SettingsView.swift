@@ -16,6 +16,8 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
   case speechModel
   case output
   case ai
+  case alwaysOn
+  case aiProvider
   case history
   case diagnostics
 
@@ -28,6 +30,8 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
     case .speechModel: "Speech Model"
     case .output: "Transcription"
     case .ai: "Tones"
+    case .alwaysOn: "Always-On"
+    case .aiProvider: "AI Provider"
     case .history: "History"
     case .diagnostics: "Diagnostics"
     }
@@ -40,6 +44,8 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
     case .speechModel: "waveform"
     case .output: "text.cursor"
     case .ai: "sparkles"
+    case .alwaysOn: "captions.bubble"
+    case .aiProvider: "brain"
     case .history: "clock.arrow.circlepath"
     case .diagnostics: "chart.bar.xaxis"
     }
@@ -68,6 +74,13 @@ struct SettingsView: View {
             .tag(SettingsPanel.output)
           Label("Tones", systemImage: "sparkles")
             .tag(SettingsPanel.ai)
+        }
+
+        Section("Assistant") {
+          Label("Always-On", systemImage: "captions.bubble")
+            .tag(SettingsPanel.alwaysOn)
+          Label("AI Provider", systemImage: "brain")
+            .tag(SettingsPanel.aiProvider)
         }
 
         Section("App") {
@@ -125,6 +138,12 @@ struct SettingsView: View {
 
     case .ai:
       TonesTab()
+
+    case .alwaysOn:
+      AlwaysOnTab()
+
+    case .aiProvider:
+      AIProviderTab()
 
     case .history:
       HistoryTab()

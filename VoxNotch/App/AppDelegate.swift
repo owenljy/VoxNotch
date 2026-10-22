@@ -34,6 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             showOnboardingWizard()
         }
+
+        AlwaysOnShortcuts.install()
+
+        #if DEBUG
+        AlwaysOnDemo.startIfRequested()
+        #endif
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -68,6 +74,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupMenu() {
         let menu = NSMenu()
+
+        let alwaysOnItem = NSMenuItem(
+            title: "Always-On Mode",
+            action: #selector(toggleAlwaysOn),
+            keyEquivalent: ""
+        )
+        alwaysOnItem.tag = Self.alwaysOnMenuTag
+        menu.addItem(alwaysOnItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         // Settings
         menu.addItem(NSMenuItem(
@@ -108,6 +124,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func statusBarButtonClicked() {
         // Toggle menu (handled by the menu property)
+    }
+
+    private static let alwaysOnMenuTag = 104
+
+    @objc private func toggleAlwaysOn() {
+        AlwaysOnController.shared.toggle()
+    }
+
+    @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.tag == Self.alwaysOnMenuTag {
+            menuItem.state = AlwaysOnController.shared.isActive ? .on : .off
+        }
+        return true
     }
 
     @objc private func openSettings() {
@@ -317,6 +346,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             self?.container.dictationController.stop()
             ModelMemoryManager.shared.stopIdleTimer()
+            MainActor.assumeIsolated {
+                AlwaysOnController.shared.stop()
+            }
         }
 
         wakeObserver = ws.addObserver(

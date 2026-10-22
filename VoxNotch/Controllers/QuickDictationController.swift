@@ -260,6 +260,12 @@ final class QuickDictationController {
 
         if case .recording = stateMachine.state { return }
 
+        // Always-On owns the microphone while active.
+        if AlwaysOnController.shared.isActive {
+            logger.debug("Ignoring dictation hotkey while Always-On is active")
+            return
+        }
+
         // Cooldown after a recent cancel
         if let lastCancel = stateMachine.lastCancelTime,
            Date().timeIntervalSince(lastCancel) < cancelCooldown {

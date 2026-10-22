@@ -71,3 +71,14 @@ enum LLMError: LocalizedError {
   }
 }
 
+extension LLMError {
+  /// Error text including the server-provided detail, for settings and inline UI.
+  nonisolated var detailedDescription: String {
+    switch self {
+    case .apiError(let message): return message
+    case .networkError(let error): return error.localizedDescription
+    case .decodingError(let error): return error.localizedDescription
+    default: return errorDescription ?? "Unknown error"
+    }
+  }
+}

@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum AudioSource: String, CaseIterable {
+nonisolated enum AudioSource: String, CaseIterable, Sendable {
     case microphone
     case systemAudio
 

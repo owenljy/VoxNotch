@@ -90,6 +90,10 @@ final class AudioCaptureManager {
     /// Whether to accumulate buffers for file saving
     var accumulateBuffers: Bool = true
 
+    /// Streaming mode (Always-On): samples go to `onResampledAudioSamples`,
+    /// nothing is accumulated and silence auto-stop is disabled.
+    private(set) var isStreaming = false
+
     /// Resampling converter for producing 16kHz mono from native input
     private var resamplingConverter: AVAudioConverter?
 
@@ -596,6 +600,11 @@ final class AudioCaptureManager {
             let frameCount = Int(outputBuffer.frameLength)
             guard error == nil, frameCount > 0, let outputChannelData = outputBuffer.floatChannelData else { return }
 
+            if self.isStreaming {
+                self.onResampledAudioSamples?(Array(UnsafeBufferPointer(start: outputChannelData[0], count: frameCount)))
+                return
+            }
+
             // Create resampledBuffer and copy directly from outputBuffer (skip Array intermediate)
             guard let resampledBuffer = AVAudioPCMBuffer(pcmFormat: self.resampledFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
             resampledBuffer.frameLength = AVAudioFrameCount(frameCount)
@@ -707,6 +716,43 @@ final class AudioCaptureManager {
 
         applySelectedDevice()
         installTapIfNeeded()
+    }
+
+    /// Start continuous capture that delivers 16kHz mono samples to `onSamples` on the audio thread.
+    func startStreaming(onSamples: @escaping @Sendable ([Float]) -> Void) async throws {
+        onResampledAudioSamples = onSamples
+        accumulateBuffers = false
+        isStreaming = true
+        do {
+            try await startRecording()
+        } catch {
+            onResampledAudioSamples = nil
+            accumulateBuffers = true
+            isStreaming = false
+            throw error
+        }
+    }
+
+    func stopStreaming() {
+        guard isStreaming else { return }
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        isTapInstalled = false
+        isRecording = false
+        isStreaming = false
+        onResampledAudioSamples = nil
+        accumulateBuffers = true
+        audioLock.withLock {
+            resamplingConverter = nil
+            recordedBuffers.removeAll()
+        }
+        reusableOutputBuffer = nil
+
+        DispatchQueue.main.async {
+            AudioVisualizationState.shared.audioLevel = 0
+            AudioVisualizationState.shared.audioFrequencyBands = [Float](repeating: 0, count: 6)
+        }
+        logger.info("Stopped streaming")
     }
 
     /// Stop recording and save to file

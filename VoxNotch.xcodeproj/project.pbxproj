@@ -11,6 +11,7 @@
 		5A12F9E92F50297400E313C7 /* MLXAudioCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5A12F9E82F50297400E313C7 /* MLXAudioCore */; };
 		5A12F9EB2F50297400E313C7 /* MLXAudioSTT in Frameworks */ = {isa = PBXBuildFile; productRef = 5A12F9EA2F50297400E313C7 /* MLXAudioSTT */; };
 		5A9233152F24FE4400DC619E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 5A9232412F24CD3500DC619E /* GRDB */; };
+		5A7E57A32F60000000ABCD01 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 5A7E57A22F60000000ABCD01 /* Textual */; };
 		5A9233162F24FE4400DC619E /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 5A9232512F24CD3500DC619E /* FluidAudio */; };
 		5A9233602F250A0000DC619E /* AnyLanguageModel in Frameworks */ = {isa = PBXBuildFile; productRef = 5A9233612F250A0000DC619E /* AnyLanguageModel */; };
 		8F9B73804E030D64A6527FE0 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 338BBE031AFE27E739EBE10B /* Cocoa.framework */; };
@@ -53,6 +54,7 @@
 				5A12F9E92F50297400E313C7 /* MLXAudioCore in Frameworks */,
 				5A12F9EB2F50297400E313C7 /* MLXAudioSTT in Frameworks */,
 				5A9233152F24FE4400DC619E /* GRDB in Frameworks */,
+				5A7E57A32F60000000ABCD01 /* Textual in Frameworks */,
 				5A9233162F24FE4400DC619E /* FluidAudio in Frameworks */,
 				5A9233602F250A0000DC619E /* AnyLanguageModel in Frameworks */,
 				5A12F9E72F50297400E313C7 /* MLXAudio in Frameworks */,
@@ -126,6 +128,7 @@
 			name = VoxNotch;
 			packageProductDependencies = (
 				5A9232412F24CD3500DC619E /* GRDB */,
+				5A7E57A22F60000000ABCD01 /* Textual */,
 				5A9232512F24CD3500DC619E /* FluidAudio */,
 				5A9233612F250A0000DC619E /* AnyLanguageModel */,
 				5A12F9E62F50297400E313C7 /* MLXAudio */,
@@ -183,6 +186,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				5A9232402F24CD3500DC619E /* XCRemoteSwiftPackageReference "GRDB" */,
+				5A7E57A12F60000000ABCD01 /* XCRemoteSwiftPackageReference "textual" */,
 				5A9232502F24CD3500DC619E /* XCRemoteSwiftPackageReference "FluidAudio" */,
 				5A9233622F250A0000DC619E /* XCRemoteSwiftPackageReference "AnyLanguageModel" */,
 				5A12F9E52F50297400E313C7 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */,
@@ -511,6 +515,14 @@
 				kind = branch;
 			};
 		};
+		5A7E57A12F60000000ABCD01 /* XCRemoteSwiftPackageReference "textual" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/textual";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.5.0;
+			};
+		};
 		5A9232402F24CD3500DC619E /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
@@ -552,6 +564,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5A12F9E52F50297400E313C7 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */;
 			productName = MLXAudioSTT;
+		};
+		5A7E57A22F60000000ABCD01 /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A7E57A12F60000000ABCD01 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
 		};
 		5A9232412F24CD3500DC619E /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;

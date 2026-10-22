@@ -62,6 +62,17 @@ final class SettingsWindowController: NSWindowController {
     NSApp.activate(ignoringOtherApps: true)
   }
 
+  func show(panel: SettingsPanel) {
+    show()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      NotificationCenter.default.post(
+        name: .settingsNavigateTo,
+        object: nil,
+        userInfo: ["panel": panel.rawValue]
+      )
+    }
+  }
+
   /// Show Settings and navigate to the Speech Model panel
   func showNavigatingToSpeechModel() {
     show()

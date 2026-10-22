@@ -1,0 +1,191 @@
+//
+//  AssistantService.swift
+//  VoxNotch
+//
+//  Sends the live transcript to the OpenAI-compatible provider and streams the
+//  answer into AlwaysOnState. One request at a time: a new ask cancels the old.
+//
+
+import Foundation
+import os
+
+@MainActor
+final class AssistantService {
+
+  typealias StreamFactory = @Sendable ([ChatMessage], OpenAICompatibleConfig) -> AsyncThrowingStream<String, Error>
+
+  static let shared = AssistantService()
+
+  private let state: AlwaysOnState
+  private let settings: AssistantSettings
+  private let makeStream: StreamFactory
+  private let logger = Logger(subsystem: "com.voxnotch", category: "AssistantService")
+
+  private var currentTask: Task<Void, Never>?
+  private(set) var currentAnswerID: UUID?
+  private(set) var currentTrigger: AssistantAnswer.Trigger?
+
+  /// UI refresh cadence for streamed text (~30fps).
+  private static let flushInterval = Duration.milliseconds(33)
+
+  init(
+    state: AlwaysOnState? = nil,
+    settings: AssistantSettings? = nil,
+    makeStream: @escaping StreamFactory = { OpenAICompatibleClient.shared.streamChat(messages: $0, config: $1) }
+  ) {
+    self.state = state ?? .shared
+    self.settings = settings ?? .shared
+    self.makeStream = makeStream
+  }
+
+  var isAnswering: Bool { currentTask != nil }
+
+  @discardableResult
+  func ask(trigger: AssistantAnswer.Trigger) -> UUID? {
+    stop()
+
+    let config = settings.providerConfig
+    var answer = AssistantAnswer(id: UUID(), createdAt: Date(), trigger: trigger, model: config.model)
+    guard settings.isProviderConfigured else {
+      answer.status = .failed("Set up an AI provider in Settings first.")
+      state.appendAnswer(answer)
+      return nil
+    }
+
+    // Partials are included directly, so the request doesn't wait for finalization;
+    // flushing just makes the transcript pane settle sooner.
+    if trigger == .manual {
+      Task { await AlwaysOnController.shared.flushPendingSpeech() }
+    }
+
+    let messages = AssistantPromptBuilder.messages(
+      systemPrompt: settings.systemPrompt,
+      transcript: state.displayRows,
+      trigger: trigger,
+      now: Date(),
+      window: settings.contextWindowMinutes * 60
+    )
+
+    state.appendAnswer(answer)
+    currentAnswerID = answer.id
+    currentTrigger = trigger
+    let stream = makeStream(messages, config)
+    currentTask = Task { await run(answerID: answer.id, stream: stream) }
+    return answer.id
+  }
+
+  /// Cancels the answer if it's still running and removes it (used for speculative answers).
+  func discard(_ id: UUID) {
+    if currentAnswerID == id {
+      currentTask?.cancel()
+      currentTask = nil
+      currentAnswerID = nil
+      currentTrigger = nil
+    }
+    state.removeAnswer(id)
+  }
+
+  func stop() {
+    currentTask?.cancel()
+    currentTask = nil
+    if let id = currentAnswerID {
+      state.updateAnswer(id) { answer in
+        if answer.isInProgress { answer.status = .stopped }
+      }
+    }
+    currentAnswerID = nil
+    currentTrigger = nil
+  }
+
+  func retry(_ answer: AssistantAnswer) {
+    ask(trigger: answer.trigger)
+  }
+
+  // MARK: - Streaming
+
+  private func run(answerID: UUID, stream: AsyncThrowingStream<String, Error>) async {
+    let clock = ContinuousClock()
+    let start = clock.now
+    let buffer = StreamBuffer(interval: Self.flushInterval) { [state] text in
+      state.updateAnswer(answerID) { $0.markdown = text }
+    }
+
+    do {
+      for try await delta in stream {
+        if buffer.text.isEmpty {
+          let latency = clock.now - start
+          state.updateAnswer(answerID) {
+            $0.status = .streaming
+            $0.firstTokenLatency = latency
+          }
+          logger.info("[latency] first token \(Self.ms(latency))ms")
+        }
+        buffer.append(delta)
+      }
+      buffer.flush()
+      try Task.checkCancellation()
+      let isEmpty = buffer.text.isEmpty
+      state.updateAnswer(answerID) { $0.status = isEmpty ? .failed("The model returned an empty answer.") : .done }
+      logger.info("[latency] answer complete \(Self.ms(clock.now - start))ms chars=\(buffer.text.count)")
+    } catch {
+      buffer.flush()
+      state.updateAnswer(answerID) { answer in
+        if error is CancellationError || Task.isCancelled {
+          answer.status = .stopped
+        } else {
+          answer.status = .failed((error as? LLMError)?.detailedDescription ?? error.localizedDescription)
+        }
+      }
+    }
+
+    if currentAnswerID == answerID {
+      currentTask = nil
+      currentAnswerID = nil
+      currentTrigger = nil
+    }
+  }
+
+  private static func ms(_ duration: Duration) -> Int {
+    let (seconds, attoseconds) = duration.components
+    return Int(seconds) * 1000 + Int(attoseconds / 1_000_000_000_000_000)
+  }
+}
+
+/// Accumulates streamed text and publishes it at most once per `interval`,
+/// always delivering the latest text (trailing flush).
+@MainActor
+private final class StreamBuffer {
+  private(set) var text = ""
+  private let interval: Duration
+  private let publish: (String) -> Void
+  private let clock = ContinuousClock()
+  private var lastFlush: ContinuousClock.Instant
+  private var pending: Task<Void, Never>?
+
+  init(interval: Duration, publish: @escaping (String) -> Void) {
+    self.interval = interval
+    self.publish = publish
+    lastFlush = clock.now
+  }
+
+  func append(_ delta: String) {
+    text += delta
+    let elapsed = clock.now - lastFlush
+    if elapsed >= interval {
+      flush()
+    } else if pending == nil {
+      pending = Task { [weak self, interval] in
+        try? await Task.sleep(for: interval - elapsed)
+        guard !Task.isCancelled else { return }
+        self?.flush()
+      }
+    }
+  }
+
+  func flush() {
+    pending?.cancel()
+    pending = nil
+    lastFlush = clock.now
+    publish(text)
+  }
+}
