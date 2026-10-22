@@ -48,6 +48,8 @@ final class AssistantSettings {
     static let askShortcut = "assistant.askShortcut"
     static let previousAnswerShortcut = "assistant.previousAnswerShortcut"
     static let nextAnswerShortcut = "assistant.nextAnswerShortcut"
+    static let saveHistory = "assistant.saveHistory"
+    static let historyRetentionDays = "assistant.historyRetentionDays"
   }
 
   private static let apiKeyAccount = "assistant.openai.apiKey"
@@ -188,6 +190,19 @@ final class AssistantSettings {
     didSet { Self.save(nextAnswerShortcut, forKey: Keys.nextAnswerShortcut) }
   }
 
+  // MARK: - History
+
+  /// Persist sessions, finalized transcript segments, and terminal AI answers
+  /// to the local database. On by default.
+  var saveHistory: Bool {
+    didSet { UserDefaults.standard.set(saveHistory, forKey: Keys.saveHistory) }
+  }
+
+  /// Days to keep Always-On history before automatic deletion (0 = keep forever).
+  var historyRetentionDays: Int {
+    didSet { UserDefaults.standard.set(historyRetentionDays, forKey: Keys.historyRetentionDays) }
+  }
+
   /// Missing key → default shortcut; empty data → explicitly cleared.
   private static func loadShortcut(forKey key: String, default defaultShortcut: KeyShortcut) -> KeyShortcut? {
     guard let data = UserDefaults.standard.data(forKey: key) else { return defaultShortcut }
@@ -304,6 +319,9 @@ final class AssistantSettings {
     askShortcut = Self.loadShortcut(forKey: Keys.askShortcut, default: .defaultAsk)
     previousAnswerShortcut = Self.loadShortcut(forKey: Keys.previousAnswerShortcut, default: .defaultPreviousAnswer)
     nextAnswerShortcut = Self.loadShortcut(forKey: Keys.nextAnswerShortcut, default: .defaultNextAnswer)
+
+    saveHistory = defaults.object(forKey: Keys.saveHistory) as? Bool ?? true
+    historyRetentionDays = defaults.object(forKey: Keys.historyRetentionDays) as? Int ?? 0
 
     textColorHex = defaults.string(forKey: Keys.textColorHex) ?? Defaults.textColorHex
     meColorHex = defaults.string(forKey: Keys.meColorHex) ?? Defaults.meColorHex

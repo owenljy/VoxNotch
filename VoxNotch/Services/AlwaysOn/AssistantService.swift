@@ -18,6 +18,7 @@ final class AssistantService {
 
   private let state: AlwaysOnState
   private let settings: AssistantSettings
+  private let historyStore: AlwaysOnHistoryStore
   private let makeStream: StreamFactory
   private let logger = Logger(subsystem: "com.voxnotch", category: "AssistantService")
 
@@ -31,10 +32,12 @@ final class AssistantService {
   init(
     state: AlwaysOnState? = nil,
     settings: AssistantSettings? = nil,
+    historyStore: AlwaysOnHistoryStore? = nil,
     makeStream: @escaping StreamFactory = { OpenAICompatibleClient.shared.streamChat(messages: $0, config: $1) }
   ) {
     self.state = state ?? .shared
     self.settings = settings ?? .shared
+    self.historyStore = historyStore ?? .shared
     self.makeStream = makeStream
   }
 
@@ -71,8 +74,9 @@ final class AssistantService {
     state.appendAnswer(answer)
     currentAnswerID = answer.id
     currentTrigger = trigger
+    let sessionID = state.sessionID
     let stream = makeStream(messages, config)
-    currentTask = Task { await run(answerID: answer.id, stream: stream) }
+    currentTask = Task { await run(answerID: answer.id, sessionID: sessionID, stream: stream) }
     return answer.id
   }
 
@@ -88,11 +92,16 @@ final class AssistantService {
   }
 
   func stop() {
+    let answerID = currentAnswerID
+    let sessionID = state.sessionID
     currentTask?.cancel()
     currentTask = nil
-    if let id = currentAnswerID {
+    if let id = answerID {
       state.updateAnswer(id) { answer in
         if answer.isInProgress { answer.status = .stopped }
+      }
+      if let answer = state.answers.first(where: { $0.id == id }) {
+        historyStore.recordAnswer(answer, sessionID: sessionID)
       }
     }
     currentAnswerID = nil
@@ -105,7 +114,7 @@ final class AssistantService {
 
   // MARK: - Streaming
 
-  private func run(answerID: UUID, stream: AsyncThrowingStream<String, Error>) async {
+  private func run(answerID: UUID, sessionID: String, stream: AsyncThrowingStream<String, Error>) async {
     let clock = ContinuousClock()
     let start = clock.now
     let buffer = StreamBuffer(interval: Self.flushInterval) { [state] text in
@@ -144,6 +153,10 @@ final class AssistantService {
       currentTask = nil
       currentAnswerID = nil
       currentTrigger = nil
+    }
+
+    if let answer = state.answers.first(where: { $0.id == answerID }) {
+      historyStore.recordAnswer(answer, sessionID: sessionID)
     }
   }
 

@@ -21,6 +21,10 @@ final class AlwaysOnState {
   }
 
   var status: Status = .idle
+
+  /// Stable identifier for the current run, shared with the persisted
+  /// `AlwaysOnSessionRecord` row. Regenerated on every `begin()`.
+  private(set) var sessionID: String = UUID().uuidString
   private(set) var activeSources: Set<AudioSource> = []
   var startedAt: Date?
   var isPaused = false
@@ -77,6 +81,7 @@ final class AlwaysOnState {
   }
 
   func begin(sources: Set<AudioSource>) {
+    sessionID = UUID().uuidString
     segments = []
     partials = [:]
     answers = []

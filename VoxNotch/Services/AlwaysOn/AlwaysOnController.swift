@@ -19,6 +19,7 @@ final class AlwaysOnController {
   private let state = AlwaysOnState.shared
   private let panel = AlwaysOnPanelController.shared
   private let settings = AssistantSettings.shared
+  private let historyStore = AlwaysOnHistoryStore.shared
   private lazy var autoTrigger = AutoTriggerCoordinator(assistant: .shared, settings: settings)
   private let logger = Logger(subsystem: "com.voxnotch", category: "AlwaysOnController")
 
@@ -57,16 +58,21 @@ final class AlwaysOnController {
     state.begin(sources: sources)
     state.suppressEcho = settings.suppressEcho
     autoTrigger.reset()
+    let sessionID = state.sessionID
+    historyStore.startSession(id: sessionID, sources: sources, startedAt: Date())
     if settings.isProviderConfigured {
       OpenAICompatibleClient.shared.warmUp(config: settings.providerConfig)
     }
     let transcriber = LiveTranscriber()
     self.transcriber = transcriber
 
-    updatesTask = Task { [state, autoTrigger] in
+    updatesTask = Task { [state, autoTrigger, historyStore, sessionID] in
       for await update in transcriber.updates {
         let accepted = state.apply(update)
         autoTrigger.handle(update, accepted: accepted)
+        if accepted, update.isFinal, let segment = state.segments.last {
+          historyStore.recordSegment(segment, sessionID: sessionID)
+        }
       }
     }
 
@@ -93,16 +99,20 @@ final class AlwaysOnController {
   }
 
   func stop() {
+    let sessionID = state.sessionID
     AssistantService.shared.stop()
     autoTrigger.reset()
     teardown()
+    historyStore.endSession(id: sessionID, endedAt: Date(), cleanly: true)
     state.end()
     panel.hide()
     logger.info("Always-On stopped")
   }
 
   func restart() {
+    let sessionID = state.sessionID
     teardown()
+    historyStore.endSession(id: sessionID, endedAt: Date(), cleanly: true)
     state.end()
     start()
   }
@@ -203,8 +213,10 @@ final class AlwaysOnController {
   }
 
   private func fail(_ error: Error) {
+    let sessionID = state.sessionID
     logger.error("Always-On failed: \(error.localizedDescription, privacy: .public)")
     teardown()
+    historyStore.endSession(id: sessionID, endedAt: Date(), cleanly: false)
     state.end()
     state.status = .failed(error.localizedDescription)
   }

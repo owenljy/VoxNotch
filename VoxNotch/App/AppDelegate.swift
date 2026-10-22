@@ -108,6 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         menu.addItem(historyItem)
 
+        let alwaysOnHistoryItem = NSMenuItem(
+            title: "Always-On History...",
+            action: #selector(openAlwaysOnHistory),
+            keyEquivalent: ""
+        )
+        menu.addItem(alwaysOnHistoryItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Quit
@@ -146,6 +153,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openHistory() {
         if #available(macOS 26.0, *) {
             HistoryWindowController.shared.show()
+        }
+    }
+
+    @objc private func openAlwaysOnHistory() {
+        if #available(macOS 26.0, *) {
+            AlwaysOnHistoryWindowController.shared.show()
         }
     }
 
@@ -259,6 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { [container] in
             do {
                 try await container.databaseManager.initialize()
+                AlwaysOnHistoryStore.shared.recoverCrashedSessions()
+                AlwaysOnHistoryStore.shared.pruneExpiredSessions()
             } catch {
                 Logger(subsystem: "com.voxnotch", category: "AppDelegate").error("Failed to initialize database: \(error.localizedDescription)")
             }

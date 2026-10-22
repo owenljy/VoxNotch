@@ -82,6 +82,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     /// Configure database
     var config = Configuration()
+    config.foreignKeysEnabled = true
     #if DEBUG
     config.prepareDatabase { db in
       db.trace { [weak self] event in
@@ -103,6 +104,21 @@ final class DatabaseManager: @unchecked Sendable {
   // MARK: - Migrations
 
   private func runMigrations(_ pool: DatabasePool) async throws {
+    /// Run all pending migrations
+    do {
+      try Self.makeMigrator().migrate(pool)
+      logger.info("Migrations completed successfully")
+    } catch {
+      logger.error("Migration failed: \(error.localizedDescription)")
+      throw DatabaseError.migrationFailed(error.localizedDescription)
+    }
+  }
+
+  /// Builds the full migration history. Exposed (rather than inlined in
+  /// `runMigrations`) so tests can apply the same schema to an isolated
+  /// database — e.g. an in-memory `DatabaseQueue` — without touching the
+  /// real on-disk database.
+  static func makeMigrator() -> DatabaseMigrator {
     var migrator = DatabaseMigrator()
 
     /// v1: Create transcription table with FTS5
@@ -181,14 +197,54 @@ final class DatabaseManager: @unchecked Sendable {
       try db.create(index: "idx_diagnostic_timestamp", on: "dictation_diagnostic", columns: ["timestamp"])
     }
 
-    /// Run all pending migrations
-    do {
-      try migrator.migrate(pool)
-      logger.info("Migrations completed successfully")
-    } catch {
-      logger.error("Migration failed: \(error.localizedDescription)")
-      throw DatabaseError.migrationFailed(error.localizedDescription)
+    /// v3: Always-On history — sessions, their finalized transcript segments, and
+    /// terminal (non-streaming) AI answers. Segments and answers cascade-delete
+    /// with their session.
+    migrator.registerMigration("v3_always_on_history") { db in
+      try db.create(table: "always_on_session") { t in
+        t.primaryKey("id", .text)
+        t.column("startedAt", .datetime).notNull()
+        t.column("endedAt", .datetime)
+        t.column("sources", .text).notNull()
+        t.column("title", .text)
+        t.column("closedCleanly", .boolean).notNull().defaults(to: false)
+      }
+      try db.create(index: "idx_always_on_session_startedAt", on: "always_on_session", columns: ["startedAt"])
+
+      try db.create(table: "always_on_segment") { t in
+        t.primaryKey("id", .text)
+        t.column("sessionID", .text).notNull().references("always_on_session", onDelete: .cascade)
+        t.column("source", .text).notNull()
+        t.column("text", .text).notNull()
+        t.column("startedAt", .datetime).notNull()
+        t.column("endedAt", .datetime).notNull()
+      }
+      try db.create(
+        index: "idx_always_on_segment_session",
+        on: "always_on_segment",
+        columns: ["sessionID", "startedAt"]
+      )
+
+      try db.create(table: "always_on_answer") { t in
+        t.primaryKey("id", .text)
+        t.column("sessionID", .text).notNull().references("always_on_session", onDelete: .cascade)
+        t.column("trigger", .text).notNull()
+        t.column("model", .text).notNull()
+        t.column("templateName", .text).notNull()
+        t.column("markdown", .text).notNull()
+        t.column("status", .text).notNull()
+        t.column("failureMessage", .text)
+        t.column("createdAt", .datetime).notNull()
+        t.column("firstTokenLatencyMs", .double)
+      }
+      try db.create(
+        index: "idx_always_on_answer_session",
+        on: "always_on_answer",
+        columns: ["sessionID", "createdAt"]
+      )
     }
+
+    return migrator
   }
 
   // MARK: - Database Access
