@@ -65,6 +65,7 @@ final class HotkeyManager {
     }
 
     var shortcuts: [RegisteredShortcut] = []
+    private var consumedShortcutKeys: Set<Int64> = []
 
     /// Whether the hotkey is currently pressed
     private(set) var isHotkeyPressed: Bool = false
@@ -77,6 +78,7 @@ final class HotkeyManager {
     /// Whether global hotkey detection is temporarily paused (e.g., during hotkey recording)
     var isPaused: Bool = false {
         didSet {
+            if isPaused { consumedShortcutKeys.removeAll() }
             if isPaused && isHotkeyPressed {
                 isHotkeyPressed = false
                 DispatchQueue.main.async { [weak self] in
@@ -216,6 +218,7 @@ final class HotkeyManager {
 
     /// Stop listening for global hotkey events
     func stopListening() {
+        consumedShortcutKeys.removeAll()
         guard eventTap != nil || runLoopSource != nil else { return }
         if let runLoopSource = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -244,6 +247,19 @@ final class HotkeyManager {
 
     // MARK: - Private Methods
 
+    /// Tracks the whole key press so repeats/releases cannot leak into the front app.
+    func handleShortcutEvent(type: CGEventType, event: CGEvent) -> Bool {
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        if type == .keyUp { return consumedShortcutKeys.remove(keyCode) != nil }
+        guard type == .keyDown else { return false }
+        if consumedShortcutKeys.contains(keyCode) { return true }
+        guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+              let registered = shortcuts.first(where: { $0.shortcut.matches(keyCode: keyCode, flags: event.flags) }),
+              registered.handler() else { return false }
+        consumedShortcutKeys.insert(keyCode)
+        return true
+    }
+
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         guard !isPaused else {
             return Unmanaged.passUnretained(event)
@@ -251,6 +267,7 @@ final class HotkeyManager {
 
         // Re-enable event tap if macOS disabled it (happens after system timeout)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            consumedShortcutKeys.removeAll()
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 #if DEBUG
@@ -261,16 +278,10 @@ final class HotkeyManager {
         }
 
         // Handle keyDown events: arrow keys for model switching, Cmd+Shift+Space for cues
+        if handleShortcutEvent(type: type, event: event) { return nil }
         if type == .keyDown {
             let flags = event.flags
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-
-            if let registered = shortcuts.first(where: { $0.shortcut.matches(keyCode: keyCode, flags: flags) }) {
-                let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                if isRepeat || registered.handler() {
-                    return isRepeat ? Unmanaged.passRetained(event) : nil
-                }
-            }
 
             // ESC key (53) — cancel active recording/session if enabled
             if keyCode == 53 && SettingsManager.shared.useEscToCancel {

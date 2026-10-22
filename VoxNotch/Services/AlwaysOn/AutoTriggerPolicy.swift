@@ -41,6 +41,7 @@ nonisolated struct AutoTriggerPolicy {
   private var answeredUtterances: [UUID] = []
   private var lastFireAt: Date?
   private var lastActivityAt = Date.distantPast
+  private var latestSystemUtterance: UUID?
 
   init(config: Config = Config()) {
     self.config = config
@@ -63,6 +64,7 @@ nonisolated struct AutoTriggerPolicy {
 
     case .systemAudio:
       let id = update.utteranceID
+      latestSystemUtterance = id
 
       if !update.isFinal {
         guard !update.text.isEmpty else { return [] }
@@ -116,6 +118,12 @@ nonisolated struct AutoTriggerPolicy {
   }
 
   mutating func noteManualAnswer() {
+    // The same utterance may still be partial when the user presses Ask.
+    // Its later final must not launch a second answer to the same question.
+    if let id = latestSystemUtterance, !answeredUtterances.contains(id) {
+      answeredUtterances.append(id)
+      if answeredUtterances.count > 32 { answeredUtterances.removeFirst() }
+    }
     hasUnansweredSpeech = false
     speculativeUtterance = nil
   }

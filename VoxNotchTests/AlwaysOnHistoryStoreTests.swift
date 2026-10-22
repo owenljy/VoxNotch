@@ -145,5 +145,89 @@ final class AlwaysOnHistoryStoreTests: XCTestCase {
     let answers = try await store.answers(for: "late")
     XCTAssertEqual(segmentTexts, ["after enabling"])
     XCTAssertEqual(answers.count, 1)
+    let sessions = try await store.sessions()
+    XCTAssertEqual(sessions.first?.sources, "microphone")
+    XCTAssertEqual(sessions.first?.startedAt, start)
+  }
+
+  func testDeleteSessionRejectsLateTranscriptAndAnswerWrites() async throws {
+    let (store, _) = try makeStore()
+    let now = Date()
+    store.startSession(id: "deleted", sources: [.microphone], startedAt: now)
+    try await store.deleteSession(id: "deleted")
+    await store.recordSegment(
+      LiveTranscriptSegment(id: UUID(), source: .microphone, text: "late", startedAt: now, endedAt: now, isFinal: true),
+      sessionID: "deleted"
+    ).value
+    var answer = AssistantAnswer(id: UUID(), createdAt: now, trigger: .manual, model: "m")
+    answer.status = .done
+    await store.recordAnswer(answer, sessionID: "deleted").value
+    let counts = try await store.counts()
+    XCTAssertEqual(counts.sessions, 0)
+    XCTAssertEqual(counts.segments, 0)
+    XCTAssertEqual(counts.answers, 0)
+  }
+
+  func testDeleteAllDrainsPendingWritesAndAllowsNewSessions() async throws {
+    let (store, _) = try makeStore()
+    let now = Date()
+    store.startSession(id: "old", sources: [.microphone], startedAt: now)
+    try await store.deleteAllHistory()
+    await store.recordSegment(
+      LiveTranscriptSegment(id: UUID(), source: .microphone, text: "late", startedAt: now, endedAt: now, isFinal: true),
+      sessionID: "old"
+    ).value
+    store.startSession(id: "new", sources: [.systemAudio], startedAt: now)
+    let sessions = try await store.sessions()
+    XCTAssertEqual(sessions.map(\.id), ["new"])
+  }
+
+  func testReadsAndRenameWaitForPendingSessionWrite() async throws {
+    let (store, _) = try makeStore()
+    store.startSession(id: "s", sources: [.microphone], startedAt: Date())
+    try await store.renameSession(id: "s", title: "Renamed")
+    let sessions = try await store.sessions()
+    XCTAssertEqual(sessions.first?.title, "Renamed")
+  }
+
+  func testLateSaveKeepsOriginalSessionEndMetadata() async throws {
+    let settings = TestSettings()
+    settings.saveHistory = false
+    let (store, _) = try makeStore(settings: settings)
+    let start = Date(timeIntervalSince1970: 5_000)
+    store.startSession(id: "late", sources: [.systemAudio], startedAt: start)
+    store.endSession(id: "late", endedAt: start.addingTimeInterval(10), cleanly: true)
+    settings.saveHistory = true
+    await store.recordSegment(
+      LiveTranscriptSegment(id: UUID(), source: .systemAudio, text: "tail", startedAt: start, endedAt: start, isFinal: true),
+      sessionID: "late"
+    ).value
+    let sessions = try await store.sessions()
+    XCTAssertEqual(sessions.first?.endedAt, start.addingTimeInterval(10))
+    XCTAssertEqual(sessions.first?.closedCleanly, true)
+  }
+
+  func testSearchMatchesEitherTableOnceAndTreatsWildcardsLiterally() async throws {
+    let (store, _) = try makeStore()
+    let now = Date()
+    store.startSession(id: "s", sources: [.microphone], startedAt: now)
+    for text in ["First transcript line", "A literal 50%_done marker"] {
+      store.recordSegment(
+        LiveTranscriptSegment(id: UUID(), source: .microphone, text: text, startedAt: now, endedAt: now, isFinal: true),
+        sessionID: "s"
+      )
+    }
+    for text in ["First answer line", "Second answer line"] {
+      var answer = AssistantAnswer(id: UUID(), createdAt: now, trigger: .manual, model: "m")
+      answer.status = .done
+      answer.markdown = text
+      store.recordAnswer(answer, sessionID: "s")
+    }
+    for query in ["transcript", "answer", "First", "50%_done"] {
+      let matches = try await store.sessions(matching: query)
+      XCTAssertEqual(matches.map(\.id), ["s"], query)
+    }
+    let noMatches = try await store.sessions(matching: "50XAdone")
+    XCTAssertTrue(noMatches.isEmpty)
   }
 }

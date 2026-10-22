@@ -70,11 +70,15 @@ struct AlwaysOnSessionRecord: Codable, Identifiable, Equatable, Hashable, Sendab
 
     let like = "%" + Self.escapeForLike(trimmed) + "%"
     let sql = """
-      SELECT DISTINCT s.*
+      SELECT s.*
       FROM always_on_session s
-      LEFT JOIN always_on_segment seg ON seg.sessionID = s.id
-      LEFT JOIN always_on_answer ans ON ans.sessionID = s.id
-      WHERE seg.text LIKE ? ESCAPE '\\' OR ans.markdown LIKE ? ESCAPE '\\'
+      WHERE EXISTS (
+        SELECT 1 FROM always_on_segment seg
+        WHERE seg.sessionID = s.id AND seg.text LIKE ? ESCAPE '\\'
+      ) OR EXISTS (
+        SELECT 1 FROM always_on_answer ans
+        WHERE ans.sessionID = s.id AND ans.markdown LIKE ? ESCAPE '\\'
+      )
       ORDER BY s.startedAt DESC
       """
     return try AlwaysOnSessionRecord.fetchAll(db, sql: sql, arguments: [like, like])

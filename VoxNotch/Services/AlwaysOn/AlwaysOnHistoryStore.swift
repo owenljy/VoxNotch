@@ -53,6 +53,9 @@ final class AlwaysOnHistoryStore {
   /// Tail of the write chain. Writes run strictly in call order, so a segment or
   /// answer can never reach the database before its session row (FOREIGN KEY).
   private var lastWrite: Task<Void, Never>?
+  private var knownSessionIDs: Set<String> = []
+  private var deletedSessionIDs: Set<String> = []
+  private var sessionRecords: [String: AlwaysOnSessionRecord] = [:]
 
   init(
     databaseManager: (any AlwaysOnDatabaseWriting)? = nil,
@@ -68,11 +71,13 @@ final class AlwaysOnHistoryStore {
   /// are confirmed non-empty. A no-op when history saving is off.
   @discardableResult
   func startSession(id: String, sources: Set<AudioSource>, startedAt: Date) -> Task<Void, Never> {
-    guard settings.saveHistory else { return Task {} }
+    knownSessionIDs.insert(id)
     let sourceString = AudioSource.allCases.filter(sources.contains).map(\.rawValue).joined(separator: ",")
     let record = AlwaysOnSessionRecord(
       id: id, startedAt: startedAt, endedAt: nil, sources: sourceString, title: nil, closedCleanly: false
     )
+    sessionRecords[id] = record
+    guard settings.saveHistory, !deletedSessionIDs.contains(id) else { return Task {} }
     return enqueueWrite("session") { db in
       var row = record
       try row.save(db)
@@ -85,7 +90,9 @@ final class AlwaysOnHistoryStore {
   /// row was never written this is a harmless no-op.
   @discardableResult
   func endSession(id: String, endedAt: Date, cleanly: Bool) -> Task<Void, Never> {
-    enqueueWrite("session end") { db in
+    sessionRecords[id]?.endedAt = endedAt
+    if cleanly { sessionRecords[id]?.closedCleanly = true }
+    return enqueueWrite("session end") { db in
       guard var row = try AlwaysOnSessionRecord.fetchOne(db, key: id) else { return }
       row.endedAt = endedAt
       if cleanly { row.closedCleanly = true }
@@ -100,7 +107,8 @@ final class AlwaysOnHistoryStore {
   /// the same row instead of duplicating it.
   @discardableResult
   func recordSegment(_ segment: LiveTranscriptSegment, sessionID: String) -> Task<Void, Never> {
-    guard settings.saveHistory else { return Task {} }
+    knownSessionIDs.insert(sessionID)
+    guard settings.saveHistory, !deletedSessionIDs.contains(sessionID) else { return Task {} }
     let record = AlwaysOnSegmentRecord(
       id: segment.id.uuidString,
       sessionID: sessionID,
@@ -109,8 +117,9 @@ final class AlwaysOnHistoryStore {
       startedAt: segment.startedAt,
       endedAt: segment.endedAt
     )
+    let session = sessionRecords[sessionID]
     return enqueueWrite("segment") { db in
-      try Self.ensureSession(sessionID, startedAt: record.startedAt, in: db)
+      try Self.ensureSession(sessionID, startedAt: record.startedAt, metadata: session, in: db)
       var row = record
       try row.save(db)
     }
@@ -123,7 +132,8 @@ final class AlwaysOnHistoryStore {
   /// this on every status change without special-casing in-progress ones.
   @discardableResult
   func recordAnswer(_ answer: AssistantAnswer, sessionID: String) -> Task<Void, Never> {
-    guard settings.saveHistory else { return Task {} }
+    knownSessionIDs.insert(sessionID)
+    guard settings.saveHistory, !deletedSessionIDs.contains(sessionID) else { return Task {} }
 
     let status: String
     let failureMessage: String?
@@ -153,8 +163,9 @@ final class AlwaysOnHistoryStore {
       createdAt: answer.createdAt,
       firstTokenLatencyMs: answer.firstTokenLatency?.milliseconds
     )
+    let session = sessionRecords[sessionID]
     return enqueueWrite("answer") { db in
-      try Self.ensureSession(sessionID, startedAt: record.createdAt, in: db)
+      try Self.ensureSession(sessionID, startedAt: record.createdAt, metadata: session, in: db)
       var row = record
       try row.save(db)
     }
@@ -162,27 +173,43 @@ final class AlwaysOnHistoryStore {
 
   // MARK: Write Ordering
 
+  /// A speculative answer may already have completed when speech resumes.
+  @discardableResult
+  func deleteAnswer(_ id: UUID) -> Task<Void, Never> {
+    enqueueWrite("answer deletion") { db in
+      _ = try AlwaysOnAnswerRecord.deleteOne(db, key: id.uuidString)
+    }
+  }
+
   private func enqueueWrite(
     _ label: String,
     _ work: @escaping @Sendable (Database) throws -> Void
   ) -> Task<Void, Never> {
-    let previous = lastWrite
-    let task = Task { [databaseAccess, logger] in
-      await previous?.value
+    // Register synchronously, before this call returns to its fire-and-forget caller.
+    let task = orderedWrite(work)
+    return Task { [logger] in
       do {
-        try await databaseAccess.write { db in try work(db) }
+        try await task.value
       } catch {
         logger.error("Failed to save Always-On \(label, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
-    lastWrite = task
+  }
+
+  private func orderedWrite(_ work: @escaping @Sendable (Database) throws -> Void) -> Task<Void, Error> {
+    let previous = lastWrite
+    let task = Task { [databaseAccess] in
+      await previous?.value
+      try await databaseAccess.write(work)
+    }
+    lastWrite = Task { _ = try? await task.value }
     return task
   }
 
   /// Creates a placeholder session row when history saving was switched on mid-session.
-  private nonisolated static func ensureSession(_ id: String, startedAt: Date, in db: Database) throws {
+  private nonisolated static func ensureSession(_ id: String, startedAt: Date, metadata: AlwaysOnSessionRecord?, in db: Database) throws {
     guard try AlwaysOnSessionRecord.fetchOne(db, key: id) == nil else { return }
-    var session = AlwaysOnSessionRecord(
+    var session = metadata ?? AlwaysOnSessionRecord(
       id: id, startedAt: startedAt, endedAt: nil, sources: "", title: nil, closedCleanly: false
     )
     try session.insert(db)
@@ -190,8 +217,13 @@ final class AlwaysOnHistoryStore {
 
   // MARK: Reading & Deletion
 
+  func flush() async {
+    await lastWrite?.value
+  }
+
   func sessions(matching query: String = "") async throws -> [AlwaysOnSessionRecord] {
-    try await databaseAccess.read { db in
+    await lastWrite?.value
+    return try await databaseAccess.read { db in
       if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         try AlwaysOnSessionRecord.allOrdered().fetchAll(db)
       } else {
@@ -201,19 +233,22 @@ final class AlwaysOnHistoryStore {
   }
 
   func segments(for sessionID: String) async throws -> [AlwaysOnSegmentRecord] {
-    try await databaseAccess.read { db in
+    await lastWrite?.value
+    return try await databaseAccess.read { db in
       try AlwaysOnSegmentRecord.forSession(sessionID).fetchAll(db)
     }
   }
 
   func answers(for sessionID: String) async throws -> [AlwaysOnAnswerRecord] {
-    try await databaseAccess.read { db in
+    await lastWrite?.value
+    return try await databaseAccess.read { db in
       try AlwaysOnAnswerRecord.forSession(sessionID).fetchAll(db)
     }
   }
 
   func counts() async throws -> (sessions: Int, segments: Int, answers: Int) {
-    try await databaseAccess.read { db in
+    await lastWrite?.value
+    return try await databaseAccess.read { db in
       (
         try AlwaysOnSessionRecord.fetchCount(db),
         try AlwaysOnSegmentRecord.fetchCount(db),
@@ -223,23 +258,36 @@ final class AlwaysOnHistoryStore {
   }
 
   func renameSession(id: String, title: String?) async throws {
-    try await databaseAccess.write { db in
+    try await orderedWrite { db in
       guard var row = try AlwaysOnSessionRecord.fetchOne(db, key: id) else { return }
       let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
       row.title = trimmed?.isEmpty == false ? trimmed : nil
       try row.update(db)
-    }
+    }.value
   }
 
   func deleteSession(id: String) async throws {
-    _ = try await databaseAccess.write { db in
-      try AlwaysOnSessionRecord.deleteOne(db, key: id)
+    deletedSessionIDs.insert(id)
+    do {
+      try await orderedWrite { db in
+        _ = try AlwaysOnSessionRecord.deleteOne(db, key: id)
+      }.value
+    } catch {
+      deletedSessionIDs.remove(id)
+      throw error
     }
   }
 
   func deleteAllHistory() async throws {
-    _ = try await databaseAccess.write { db in
-      try AlwaysOnSessionRecord.deleteAll(db)
+    let newlyDeleted = knownSessionIDs.subtracting(deletedSessionIDs)
+    deletedSessionIDs.formUnion(newlyDeleted)
+    do {
+      try await orderedWrite { db in
+        _ = try AlwaysOnSessionRecord.deleteAll(db)
+      }.value
+    } catch {
+      deletedSessionIDs.subtract(newlyDeleted)
+      throw error
     }
   }
 

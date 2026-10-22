@@ -103,4 +103,29 @@ final class UtteranceSegmenterTests: XCTestCase {
     XCTAssertFalse(segmenter.isSpeaking)
     XCTAssertNil(segmenter.flush())
   }
+
+  func testShortSpeechDoesNotCountTrimmedSilenceTwice() {
+    var segmenter = UtteranceSegmenter()
+    let events = run(&segmenter, [0.9, 0.1, 0.1])
+    guard case .final(let final) = events.last! else { return XCTFail("expected final") }
+    XCTAssertEqual(final.samples.count - final.retainedSilenceSamples, chunkSize)
+    XCTAssertGreaterThanOrEqual(final.samples.count - final.retainedSilenceSamples, LiveTranscriber.Config().minFinalSamples)
+    XCTAssertEqual(final.trailingSilenceSamples, 2 * chunkSize, "latency still includes the full silence run")
+  }
+
+  func testFlushWithoutTailPreservesKnownSilenceForNoiseGate() {
+    var segmenter = UtteranceSegmenter()
+    _ = run(&segmenter, [0.9, 0.1])
+    guard case .final(let final) = segmenter.flush() else { return XCTFail("expected final") }
+    XCTAssertEqual(final.retainedSilenceSamples, chunkSize)
+  }
+
+  func testIdleFlushAccountsForDiscardedTailInNextTimestamp() {
+    var segmenter = UtteranceSegmenter()
+    XCTAssertNil(segmenter.flush(appending: [Float](repeating: 0, count: 123)))
+    guard case .partial(let next) = segmenter.process(chunk: chunk(1), speechProbability: 0.9) else {
+      return XCTFail("expected partial")
+    }
+    XCTAssertEqual(next.startSample, 123)
+  }
 }

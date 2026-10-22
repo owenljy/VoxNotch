@@ -46,6 +46,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cleanup()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Task {
+            await AlwaysOnController.shared.stopAndWait()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // Keep app running when windows are closed (menu bar app)
         return false
@@ -209,10 +217,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let deviceID = sender.tag
         let audioManager = AudioCaptureManager.shared
 
-        if deviceID == 0 {
-            audioManager.selectInputDevice(nil)
+        let selection = deviceID == 0 ? nil : AudioDeviceID(deviceID)
+        if AlwaysOnController.shared.isActive {
+            AlwaysOnController.shared.selectMicrophone(selection)
         } else {
-            audioManager.selectInputDevice(AudioDeviceID(deviceID))
+            audioManager.selectInputDevice(selection)
         }
 
         /// Rebuild the submenu to update checkmarks

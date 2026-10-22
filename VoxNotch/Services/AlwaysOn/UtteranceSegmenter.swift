@@ -31,6 +31,9 @@ nonisolated struct UtteranceSegmenter {
     let id: UUID
     let startSample: Int
     let samples: [Float]
+    /// Silence still present in `samples`, after trimming.
+    let retainedSilenceSamples: Int
+    /// Full silence run, used to measure time since speech ended.
     let trailingSilenceSamples: Int
   }
 
@@ -92,10 +95,11 @@ nonisolated struct UtteranceSegmenter {
 
   /// Finalize the in-progress utterance immediately, including audio not yet chunked.
   mutating func flush(appending tail: [Float] = []) -> Event? {
+    defer { processedSamples += tail.count }
     guard isSpeaking else { return nil }
     utterance += tail
-    processedSamples += tail.count
-    silentChunkSizes = []
+    // A nonempty tail hasn't been classified by VAD, so don't trim it as silence.
+    if !tail.isEmpty { silentChunkSizes = [] }
     return finish(continueSpeaking: false)
   }
 
@@ -121,6 +125,7 @@ nonisolated struct UtteranceSegmenter {
       id: utteranceID,
       startSample: utteranceStart,
       samples: Array(utterance.dropLast(dropped)),
+      retainedSilenceSamples: silence - dropped,
       trailingSilenceSamples: silence
     )
   }

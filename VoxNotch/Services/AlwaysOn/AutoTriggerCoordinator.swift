@@ -59,13 +59,14 @@ final class AutoTriggerCoordinator {
 
   private func currentConfig() -> AutoTriggerPolicy.Config {
     AutoTriggerPolicy.Config(
-      isEnabled: settings.autoAnswer && settings.isProviderConfigured,
+      isEnabled: settings.autoAnswer && settings.isProviderConfigured && !AlwaysOnState.shared.isPaused,
       answerQuestionsImmediately: settings.answerQuestionsImmediately,
       silenceDelay: settings.autoAnswerSilence
     )
   }
 
   private func fire(speculative: Bool) {
+    guard currentConfig().isEnabled else { return }
     // Never interrupt an answer the user explicitly asked for.
     guard assistant.currentTrigger != .manual else { return }
     silenceTask?.cancel()
@@ -81,6 +82,7 @@ final class AutoTriggerCoordinator {
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(max(wait, 0.05)))
         guard !Task.isCancelled, let self else { return }
+        self.policy.config = self.currentConfig()
         switch self.policy.silenceCheck(now: Date()) {
         case .fire:
           self.fire(speculative: false)

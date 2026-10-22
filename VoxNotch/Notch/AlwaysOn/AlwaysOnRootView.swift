@@ -140,7 +140,7 @@ private struct AlwaysOnHeaderView: View {
         .disabled(state.status != .running)
 
         PanelIconButton(systemName: "eraser", help: "Clear transcript") {
-          state.clearTranscript()
+          AlwaysOnController.shared.clearTranscript()
         }
 
         PanelIconButton(

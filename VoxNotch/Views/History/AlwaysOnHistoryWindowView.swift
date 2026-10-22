@@ -15,6 +15,7 @@ struct AlwaysOnHistoryWindowView: View {
   @State private var selectedSession: AlwaysOnSessionRecord?
   @State private var searchText = ""
   @State private var isLoading = false
+  @State private var loadRequestID = UUID()
   @State private var showDeleteConfirmation = false
   @State private var sessionToDelete: AlwaysOnSessionRecord?
 
@@ -26,8 +27,7 @@ struct AlwaysOnHistoryWindowView: View {
     }
     .navigationTitle("Always-On History")
     .searchable(text: $searchText, prompt: "Search transcripts and answers")
-    .task { await loadSessions() }
-    .onChange(of: searchText) { _, _ in Task { await loadSessions() } }
+    .task(id: searchText) { await loadSessions() }
     .confirmationDialog(
       "Delete Always-On session?",
       isPresented: $showDeleteConfirmation,
@@ -116,14 +116,19 @@ struct AlwaysOnHistoryWindowView: View {
   }()
 
   private func loadSessions() async {
+    let requestID = UUID()
+    loadRequestID = requestID
     isLoading = true
-    defer { isLoading = false }
+    defer { if loadRequestID == requestID { isLoading = false } }
     do {
-      sessions = try await AlwaysOnHistoryStore.shared.sessions(matching: searchText)
+      let loaded = try await AlwaysOnHistoryStore.shared.sessions(matching: searchText)
+      guard !Task.isCancelled, loadRequestID == requestID else { return }
+      sessions = loaded
       if let selectedSession, !sessions.contains(where: { $0.id == selectedSession.id }) {
         self.selectedSession = nil
       }
     } catch {
+      guard !Task.isCancelled, loadRequestID == requestID else { return }
       sessions = []
       Logger(subsystem: "com.voxnotch", category: "AlwaysOnHistoryWindowView").error("Failed to load sessions: \(error.localizedDescription)")
     }
@@ -176,7 +181,7 @@ private struct AlwaysOnSessionRow: View {
       HStack(spacing: InterfaceScale.Space.medium) {
         AlwaysOnMetadataPill(icon: "clock", text: relativeStart)
         AlwaysOnMetadataPill(icon: "waveform", text: sources)
-        if !session.closedCleanly {
+        if !session.closedCleanly, session.endedAt != nil {
           AlwaysOnMetadataPill(icon: "exclamationmark.triangle", text: "Recovered", tint: .orange)
         }
         Spacer()
@@ -275,7 +280,7 @@ private struct AlwaysOnSessionDetailView: View {
         AlwaysOnDetailBadge(icon: "waveform", text: sourceText)
         AlwaysOnDetailBadge(icon: "text.bubble", text: "\(segments.count) turns")
         AlwaysOnDetailBadge(icon: "sparkles", text: "\(answers.count) answers", tint: .purple)
-        if !session.closedCleanly {
+        if !session.closedCleanly, session.endedAt != nil {
           AlwaysOnDetailBadge(icon: "exclamationmark.triangle", text: "Recovered after crash", tint: .orange)
         }
       }
@@ -381,7 +386,12 @@ private struct TimelineItem: Identifiable {
     case answer(AlwaysOnAnswerRecord)
   }
 
-  let id = UUID()
+  var id: String {
+    switch kind {
+    case .segment(let segment): "segment-\(segment.id)"
+    case .answer(let answer): "answer-\(answer.id)"
+    }
+  }
   let time: Date
   let kind: Kind
 }

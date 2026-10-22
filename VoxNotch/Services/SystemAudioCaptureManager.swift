@@ -161,6 +161,7 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
     /// Start capturing system audio
     /// - Throws: SystemAudioCaptureError if capture cannot start
     func startRecording() async throws {
+        try Task.checkCancellation()
         if isRecording {
             logger.debug("Already recording, stopping previous stream")
             cancelRecording()
@@ -180,10 +181,12 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         } catch {
+            try Task.checkCancellation()
             logger.error("Screen recording permission denied: \(error.localizedDescription)")
             throw SystemAudioCaptureError.screenRecordingPermissionDenied
         }
 
+        try Task.checkCancellation()
         guard let display = content.displays.first else {
             throw SystemAudioCaptureError.noDisplayFound
         }
@@ -215,7 +218,12 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
 
         do {
             try await newStream.startCapture()
+            if Task.isCancelled {
+                try? await newStream.stopCapture()
+                throw CancellationError()
+            }
         } catch {
+            try Task.checkCancellation()
             logger.error("Failed to start capture: \(error.localizedDescription)")
             throw SystemAudioCaptureError.streamStartFailed(error)
         }
@@ -228,6 +236,7 @@ final class SystemAudioCaptureManager: NSObject, SCStreamOutput, SCStreamDelegat
 
     /// Start continuous capture that delivers 16kHz mono samples to `onSamples` on the audio queue.
     func startStreaming(onSamples: @escaping @Sendable ([Float]) -> Void) async throws {
+        try Task.checkCancellation()
         onResampledAudioSamples = onSamples
         audioQueue.sync { self.isStreaming = true }
         do {

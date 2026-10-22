@@ -58,6 +58,8 @@ final class AlwaysOnState {
 
   /// Finalized transcript lines in chronological order.
   private(set) var segments: [LiveTranscriptSegment] = []
+  /// The row changed by the most recent accepted final (which may arrive out of order).
+  private(set) var lastFinalSegment: LiveTranscriptSegment?
 
   /// In-progress (volatile) utterance per source.
   private(set) var partials: [AudioSource: LiveTranscriptSegment] = [:]
@@ -75,14 +77,22 @@ final class AlwaysOnState {
     }
   }
 
-  /// Transcript lines followed by in-progress partials, in display order.
+  /// Finals and in-progress partials in chronological display order.
   var displayRows: [LiveTranscriptSegment] {
-    segments + partials.values.sorted { $0.startedAt < $1.startedAt }
+    var rows = segments
+    // Finals are already sorted; insert at most two partials rather than sorting
+    // the whole session again on every streaming update.
+    for partial in partials.values.sorted(by: { $0.startedAt < $1.startedAt }) {
+      let index = rows.firstIndex { $0.startedAt > partial.startedAt } ?? rows.endIndex
+      rows.insert(partial, at: index)
+    }
+    return rows
   }
 
   func begin(sources: Set<AudioSource>) {
     sessionID = UUID().uuidString
     segments = []
+    lastFinalSegment = nil
     partials = [:]
     answers = []
     selectedAnswerID = nil
@@ -111,6 +121,7 @@ final class AlwaysOnState {
 
   func clearTranscript() {
     segments = []
+    lastFinalSegment = nil
     partials = [:]
     answers = []
     selectedAnswerID = nil
@@ -165,23 +176,29 @@ final class AlwaysOnState {
     if partials[update.source]?.id == update.utteranceID {
       partials[update.source] = nil
     }
+    lastFinalSegment = nil
     guard !update.text.isEmpty, !isEcho(update) else { return false }
 
-    if let lastIndex = segments.indices.last,
-       segments[lastIndex].source == update.source,
-       update.startedAt.timeIntervalSince(segments[lastIndex].endedAt) <= mergeGap
+    let insertionIndex = segments.firstIndex { $0.startedAt > update.startedAt } ?? segments.endIndex
+    let previousIndex = insertionIndex - 1
+    if previousIndex >= 0,
+       segments[previousIndex].source == update.source,
+       (0...mergeGap).contains(update.startedAt.timeIntervalSince(segments[previousIndex].endedAt))
     {
-      segments[lastIndex].text += " " + update.text
-      segments[lastIndex].endedAt = update.endedAt
+      segments[previousIndex].text += " " + update.text
+      segments[previousIndex].endedAt = update.endedAt
+      lastFinalSegment = segments[previousIndex]
     } else {
-      segments.append(LiveTranscriptSegment(
+      let segment = LiveTranscriptSegment(
         id: update.utteranceID,
         source: update.source,
         text: update.text,
         startedAt: update.startedAt,
         endedAt: update.endedAt,
         isFinal: true
-      ))
+      )
+      segments.insert(segment, at: insertionIndex)
+      lastFinalSegment = segment
     }
     return true
   }

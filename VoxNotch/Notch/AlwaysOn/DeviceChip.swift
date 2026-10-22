@@ -97,6 +97,7 @@ struct DeviceChip: View {
         Text(title)
       }
     }
+    .disabled(!canChange)
   }
 
   // MARK: - Display

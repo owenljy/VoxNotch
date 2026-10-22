@@ -23,6 +23,8 @@ final class AssistantService {
   private let logger = Logger(subsystem: "com.voxnotch", category: "AssistantService")
 
   private var currentTask: Task<Void, Never>?
+  private var currentBuffer: StreamBuffer?
+  private var currentSessionID: String?
   private(set) var currentAnswerID: UUID?
   private(set) var currentTrigger: AssistantAnswer.Trigger?
 
@@ -77,6 +79,7 @@ final class AssistantService {
     currentAnswerID = answer.id
     currentTrigger = trigger
     let sessionID = state.sessionID
+    currentSessionID = sessionID
     let stream = makeStream(messages, config)
     currentTask = Task { await run(answerID: answer.id, sessionID: sessionID, stream: stream) }
     return answer.id
@@ -87,27 +90,33 @@ final class AssistantService {
     if currentAnswerID == id {
       currentTask?.cancel()
       currentTask = nil
+      currentBuffer = nil
+      currentSessionID = nil
       currentAnswerID = nil
       currentTrigger = nil
     }
     state.removeAnswer(id)
+    historyStore.deleteAnswer(id)
   }
 
   func stop() {
     let answerID = currentAnswerID
-    let sessionID = state.sessionID
+    let sessionID = currentSessionID
+    currentBuffer?.flush()
     currentTask?.cancel()
     currentTask = nil
+    currentBuffer = nil
     if let id = answerID {
       state.updateAnswer(id) { answer in
         if answer.isInProgress { answer.status = .stopped }
       }
-      if let answer = state.answers.first(where: { $0.id == id }) {
+      if let sessionID, let answer = state.answers.first(where: { $0.id == id }) {
         historyStore.recordAnswer(answer, sessionID: sessionID)
       }
     }
     currentAnswerID = nil
     currentTrigger = nil
+    currentSessionID = nil
   }
 
   func retry(_ answer: AssistantAnswer) {
@@ -117,14 +126,28 @@ final class AssistantService {
   // MARK: - Streaming
 
   private func run(answerID: UUID, sessionID: String, stream: AsyncThrowingStream<String, Error>) async {
+    defer {
+      if currentAnswerID == answerID {
+        currentTask = nil
+        currentAnswerID = nil
+        currentTrigger = nil
+        currentBuffer = nil
+        currentSessionID = nil
+      }
+    }
+    guard currentAnswerID == answerID, state.sessionID == sessionID, !Task.isCancelled else { return }
     let clock = ContinuousClock()
     let start = clock.now
-    let buffer = StreamBuffer(interval: Self.flushInterval) { [state] text in
-      state.updateAnswer(answerID) { $0.markdown = text }
+    let buffer = StreamBuffer(interval: Self.flushInterval) { [weak self] text in
+      guard let self, self.currentAnswerID == answerID, self.state.sessionID == sessionID else { return }
+      self.state.updateAnswer(answerID) { $0.markdown = text }
     }
+    currentBuffer = buffer
 
     do {
       for try await delta in stream {
+        try Task.checkCancellation()
+        guard currentAnswerID == answerID, state.sessionID == sessionID else { return }
         if buffer.text.isEmpty {
           let latency = clock.now - start
           state.updateAnswer(answerID) {
@@ -135,12 +158,14 @@ final class AssistantService {
         }
         buffer.append(delta)
       }
-      buffer.flush()
       try Task.checkCancellation()
+      guard currentAnswerID == answerID, state.sessionID == sessionID else { return }
+      buffer.flush()
       let isEmpty = buffer.text.isEmpty
       state.updateAnswer(answerID) { $0.status = isEmpty ? .failed("The model returned an empty answer.") : .done }
       logger.info("[latency] answer complete \(Self.ms(clock.now - start))ms chars=\(buffer.text.count)")
     } catch {
+      guard currentAnswerID == answerID, state.sessionID == sessionID else { return }
       buffer.flush()
       state.updateAnswer(answerID) { answer in
         if error is CancellationError || Task.isCancelled {
@@ -149,12 +174,6 @@ final class AssistantService {
           answer.status = .failed((error as? LLMError)?.detailedDescription ?? error.localizedDescription)
         }
       }
-    }
-
-    if currentAnswerID == answerID {
-      currentTask = nil
-      currentAnswerID = nil
-      currentTrigger = nil
     }
 
     if let answer = state.answers.first(where: { $0.id == answerID }) {

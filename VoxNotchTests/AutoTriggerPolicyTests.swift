@@ -100,4 +100,14 @@ final class AutoTriggerPolicyTests: XCTestCase {
     policy.noteManualAnswer()
     XCTAssertEqual(policy.silenceCheck(now: at(5)), .none)
   }
+
+  func testManualAskDuringPartialPreventsDuplicateAutoAnswerOnFinal() {
+    var policy = AutoTriggerPolicy()
+    let id = UUID()
+    _ = policy.handle(update(.systemAudio, "What is a trie?", id: id), accepted: true, now: at(0))
+    policy.noteManualAnswer()
+    XCTAssertEqual(policy.handle(update(.systemAudio, "What is a trie?", id: id, final: true), accepted: true, now: at(2)), [])
+    XCTAssertEqual(policy.silenceCheck(now: at(5)), .none)
+    XCTAssertEqual(policy.handle(update(.systemAudio, "And a heap?", id: UUID(), final: true), accepted: true, now: at(6)), [.fire(speculative: false)])
+  }
 }

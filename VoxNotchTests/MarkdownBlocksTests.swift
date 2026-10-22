@@ -8,6 +8,27 @@ import XCTest
 
 final class MarkdownBlocksTests: XCTestCase {
 
+  func testTildeCodeFencesKeepMathAndCloseDuringStreaming() {
+    let code = "~~~sh\necho $PATH$\n\n# **literal"
+    XCTAssertEqual(MarkdownBlocks.split(code), [code])
+    XCTAssertEqual(MarkdownBlocks.plainMath(code), code)
+    XCTAssertEqual(MarkdownBlocks.closingOpenMarkers(code), code + "\n~~~")
+  }
+
+  func testShorterOrDifferentFenceInsideCodeDoesNotCloseIt() {
+    let code = "````markdown\n```python\n~~~\n\n$x$\n````"
+    XCTAssertEqual(MarkdownBlocks.split(code + "\n\nAfter"), [code, "After"])
+    XCTAssertEqual(MarkdownBlocks.plainMath(code), code)
+    XCTAssertEqual(MarkdownBlocks.closingOpenMarkers(code), code)
+  }
+
+  func testMarkersInsideFinishedCodeAreNotClosedAsMarkdown() {
+    let code = "```python\nprint('**')\n```"
+    XCTAssertEqual(MarkdownBlocks.closingOpenMarkers(code), code)
+    let mixed = "Cost $O(n)$\n~~~sh\necho $PATH$\n~~~"
+    XCTAssertEqual(MarkdownBlocks.plainMath(mixed), "Cost O(n)\n~~~sh\necho $PATH$\n~~~")
+  }
+
   func testSplitsParagraphsOnBlankLines() {
     XCTAssertEqual(MarkdownBlocks.split("One.\n\nTwo.\n\n\nThree."), ["One.", "Two.", "Three."])
   }

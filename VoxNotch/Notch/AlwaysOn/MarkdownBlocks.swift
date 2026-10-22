@@ -15,7 +15,7 @@ nonisolated enum MarkdownBlocks {
   static func split(_ markdown: String) -> [String] {
     var blocks: [String] = []
     var current: [Substring] = []
-    var inFence = false
+    var fence: Fence?
 
     func closeBlock() {
       guard !current.isEmpty else { return }
@@ -25,11 +25,9 @@ nonisolated enum MarkdownBlocks {
 
     for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
       let trimmed = line.trimmingCharacters(in: .whitespaces)
-      if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-        inFence.toggle()
-      }
+      updateFence(for: line, fence: &fence)
 
-      if !inFence, trimmed.isEmpty {
+      if fence == nil, trimmed.isEmpty {
         closeBlock()
         continue
       }
@@ -46,14 +44,19 @@ nonisolated enum MarkdownBlocks {
   /// Closes markers left open mid-stream (code fences, `**`, inline code) so the
   /// partial block renders formatted instead of showing raw syntax.
   static func closingOpenMarkers(_ block: String) -> String {
-    let fenceCount = block.split(separator: "\n", omittingEmptySubsequences: false)
-      .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("```") }
-      .count
-    if fenceCount % 2 == 1 { return block + "\n```" }
+    var fence: Fence?
+    var outside: [String] = []
+    for line in block.split(separator: "\n", omittingEmptySubsequences: false) {
+      let wasInFence = fence != nil
+      updateFence(for: line, fence: &fence)
+      if !wasInFence, fence == nil { outside.append(String(line)) }
+    }
+    if let fence { return block + "\n" + String(repeating: String(fence.marker), count: fence.count) }
+    let inline = outside.joined(separator: "\n")
 
     var result = block
-    if result.components(separatedBy: "`").count % 2 == 0 { result += "`" }
-    if result.components(separatedBy: "**").count % 2 == 0 {
+    if inline.components(separatedBy: "`").count % 2 == 0 { result += "`" }
+    if inline.components(separatedBy: "**").count % 2 == 0 {
       result = result.hasSuffix("*") && !result.hasSuffix("**") ? String(result.dropLast()) + "**" : result + "**"
     }
     return result
@@ -62,11 +65,37 @@ nonisolated enum MarkdownBlocks {
   /// Renders inline LaTeX like `$O(n \\log k)$` or `$N$` as plain text. Leaves currency
   /// ("$5 and $10"), inline code and fenced code untouched.
   static func plainMath(_ block: String) -> String {
-    guard block.contains("$"), !block.trimmingCharacters(in: .whitespaces).hasPrefix("```") else { return block }
-    // Even indices are outside `inline code`.
-    return block.components(separatedBy: "`").enumerated().map { index, part in
-      index.isMultiple(of: 2) ? replaceInlineMath(in: part) : part
-    }.joined(separator: "`")
+    guard block.contains("$") else { return block }
+    var fence: Fence?
+    return block.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+      let wasInFence = fence != nil
+      updateFence(for: line, fence: &fence)
+      guard !wasInFence, fence == nil else { return String(line) }
+      // Even indices are outside `inline code`.
+      return line.components(separatedBy: "`").enumerated().map { index, part in
+        index.isMultiple(of: 2) ? replaceInlineMath(in: part) : part
+      }.joined(separator: "`")
+    }.joined(separator: "\n")
+  }
+
+  private struct Fence {
+    let marker: Character
+    let count: Int
+  }
+
+  private static func updateFence(for line: Substring, fence: inout Fence?) {
+    let indentation = line.prefix { $0 == " " }.count
+    guard indentation <= 3 else { return }
+    let text = line.dropFirst(indentation)
+    guard let marker = text.first, marker == "`" || marker == "~" else { return }
+    let count = text.prefix { $0 == marker }.count
+    guard count >= 3 else { return }
+    let suffix = text.dropFirst(count)
+    if let current = fence {
+      if marker == current.marker, count >= current.count, suffix.allSatisfy(\.isWhitespace) { fence = nil }
+    } else if marker != "`" || !suffix.contains("`") {
+      fence = Fence(marker: marker, count: count)
+    }
   }
 
   private static let inlineMath = try! NSRegularExpression(pattern: #"\$([^$\n]{1,60})\$"#)

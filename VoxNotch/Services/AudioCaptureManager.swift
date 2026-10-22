@@ -630,6 +630,7 @@ final class AudioCaptureManager {
     }
 
     func startRecording() async throws {
+        try Task.checkCancellation()
         guard hasMicrophonePermission else {
             throw AudioCaptureError.permissionDenied
         }
@@ -720,6 +721,7 @@ final class AudioCaptureManager {
 
     /// Start continuous capture that delivers 16kHz mono samples to `onSamples` on the audio thread.
     func startStreaming(onSamples: @escaping @Sendable ([Float]) -> Void) async throws {
+        try Task.checkCancellation()
         onResampledAudioSamples = onSamples
         accumulateBuffers = false
         isStreaming = true

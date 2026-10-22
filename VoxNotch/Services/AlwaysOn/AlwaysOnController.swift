@@ -30,6 +30,11 @@ final class AlwaysOnController {
   private var levelTask: Task<Void, Never>?
   private var ingestTasks: [AudioSource: Task<Void, Never>] = [:]
   private var sampleContinuations: [AudioSource: AsyncStream<[Float]>.Continuation] = [:]
+  private var isEndingSession = false
+  private var finalizationTask: Task<Void, Never>?
+  private lazy var captureCoordinator = AlwaysOnCaptureCoordinator { [weak self] source in
+    self?.stopCapture(source)
+  }
 
   private init() {}
 
@@ -68,11 +73,21 @@ final class AlwaysOnController {
     let transcriber = LiveTranscriber()
     self.transcriber = transcriber
 
+    // History keeps its own transcript while a stopped session drains. A new
+    // session can begin immediately without accepting the old session's finals.
+    let historyTranscript = AlwaysOnState()
+    historyTranscript.begin(sources: sources)
+    historyTranscript.suppressEcho = settings.suppressEcho
     updatesTask = Task { [state, autoTrigger, historyStore, sessionID] in
       for await update in transcriber.updates {
-        let accepted = state.apply(update)
-        autoTrigger.handle(update, accepted: accepted)
-        if accepted, update.isFinal, let segment = state.segments.last {
+        if state.sessionID == sessionID, state.isActive {
+          for source in AudioSource.allCases {
+            historyTranscript.setSource(source, active: state.activeSources.contains(source))
+          }
+          let accepted = state.apply(update)
+          autoTrigger.handle(update, accepted: accepted)
+        }
+        if historyTranscript.apply(update), update.isFinal, let segment = historyTranscript.lastFinalSegment {
           historyStore.recordSegment(segment, sessionID: sessionID)
         }
       }
@@ -87,7 +102,8 @@ final class AlwaysOnController {
       do {
         try await transcriber.prepare(asr: loadASRManager())
         try Task.checkCancellation()
-        try await startCapture(sources: sources, into: transcriber)
+        try await startCapture(sources: sources, into: transcriber, sessionID: sessionID)
+        try checkSession(sessionID)
         state.status = .running
         state.startedAt = Date()
         startLevelPolling(transcriber)
@@ -95,12 +111,17 @@ final class AlwaysOnController {
       } catch is CancellationError {
         return
       } catch {
+        guard state.sessionID == sessionID, state.isActive else { return }
         fail(error)
       }
     }
   }
 
   func stop() {
+    guard state.isActive || transcriber != nil else {
+      panel.hide()
+      return
+    }
     let sessionID = state.sessionID
     AssistantService.shared.stop()
     autoTrigger.reset()
@@ -111,11 +132,16 @@ final class AlwaysOnController {
     logger.info("Always-On stopped")
   }
 
+  /// Used on normal app termination so the last transcript and close marker
+  /// reach SQLite before the process exits.
+  func stopAndWait() async {
+    stop()
+    await finalizationTask?.value
+    await historyStore.flush()
+  }
+
   func restart() {
-    let sessionID = state.sessionID
-    teardown()
-    historyStore.endSession(id: sessionID, endedAt: Date(), cleanly: true)
-    state.end()
+    stop()
     start()
   }
 
@@ -129,21 +155,24 @@ final class AlwaysOnController {
     AssistantService.shared.ask(trigger: .manual)
   }
 
+  func clearTranscript() {
+    AssistantService.shared.stop()
+    autoTrigger.reset()
+    state.clearTranscript()
+  }
+
   /// Pausing releases the microphone and system-audio capture entirely.
   func togglePause() {
     guard state.status == .running, let transcriber else { return }
     if state.isPaused {
       state.isPaused = false
-      sessionTask = Task {
-        do {
-          try await startCapture(sources: state.activeSources, into: transcriber)
-        } catch {
-          fail(error)
-        }
+      for source in state.activeSources {
+        observeCapture(beginCapture(source, into: transcriber, sessionID: state.sessionID), source: source)
       }
     } else {
       state.isPaused = true
-      stopCapture()
+      autoTrigger.reset()
+      captureCoordinator.stopAll()
       state.levels = [:]
       Task { await transcriber.flush() }
     }
@@ -154,19 +183,13 @@ final class AlwaysOnController {
   /// Switch microphones mid-session. Capture is stopped before the device changes,
   /// because swapping the device under a running tap leaves a stale format converter.
   func selectMicrophone(_ deviceID: AudioDeviceID?) {
+    guard state.status == .running else { return }
     let isCapturing = state.status == .running && !state.isPaused && state.activeSources.contains(.microphone)
-    if isCapturing { stopCapture(.microphone) }
+    if isCapturing { captureCoordinator.stop(.microphone) }
     AudioCaptureManager.shared.selectInputDevice(deviceID)
     AudioDeviceMonitor.shared.refresh()
     guard isCapturing, let transcriber else { return }
-    sessionTask = Task {
-      do {
-        try await startCapture(sources: [.microphone], into: transcriber)
-      } catch {
-        logger.error("Microphone restart failed: \(error.localizedDescription, privacy: .public)")
-        state.setSource(.microphone, active: false)
-      }
-    }
+    observeCapture(beginCapture(.microphone, into: transcriber, sessionID: state.sessionID), source: .microphone)
   }
 
   /// Turn one source on or off for the current session.
@@ -177,16 +200,9 @@ final class AlwaysOnController {
     guard !state.isPaused else { return }
 
     if enabled {
-      sessionTask = Task {
-        do {
-          try await startCapture(sources: [source], into: transcriber)
-        } catch {
-          logger.error("Could not start \(source.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
-          state.setSource(source, active: false)
-        }
-      }
+      observeCapture(beginCapture(source, into: transcriber, sessionID: state.sessionID), source: source)
     } else {
-      stopCapture(source)
+      captureCoordinator.stop(source)
       Task { await transcriber.flush(source: source) }
     }
   }
@@ -210,14 +226,29 @@ final class AlwaysOnController {
     return manager
   }
 
-  private func startCapture(sources: Set<AudioSource>, into transcriber: LiveTranscriber) async throws {
+  private func checkSession(_ sessionID: String) throws {
+    try Task.checkCancellation()
+    guard state.sessionID == sessionID, state.isActive else { throw CancellationError() }
+  }
+
+  private func startCapture(sources: Set<AudioSource>, into transcriber: LiveTranscriber, sessionID: String) async throws {
     for source in AudioSource.allCases where sources.contains(source) {
+      try checkSession(sessionID)
+      try await beginCapture(source, into: transcriber, sessionID: sessionID).value
+    }
+  }
+
+  private func beginCapture(_ source: AudioSource, into transcriber: LiveTranscriber, sessionID: String) -> Task<Void, Error> {
+    captureCoordinator.start(source) {
+      try self.checkSession(sessionID)
+      guard !self.state.isPaused, self.state.activeSources.contains(source) else { throw CancellationError() }
       await transcriber.startSource(source)
+      try self.checkSession(sessionID)
 
       // ~10s of headroom; oldest audio is dropped only if the pipeline stalls badly.
       let (stream, continuation) = AsyncStream<[Float]>.makeStream(bufferingPolicy: .bufferingNewest(500))
-      sampleContinuations[source] = continuation
-      ingestTasks[source] = Task.detached(priority: .userInitiated) {
+      self.sampleContinuations[source] = continuation
+      self.ingestTasks[source] = Task.detached(priority: .userInitiated) {
         for await samples in stream {
           await transcriber.ingest(samples, from: source)
         }
@@ -233,8 +264,21 @@ final class AlwaysOnController {
     }
   }
 
-  private func stopCapture() {
-    AudioSource.allCases.forEach(stopCapture)
+  private func observeCapture(_ task: Task<Void, Error>, source: AudioSource) {
+    let sessionID = state.sessionID
+    let generation = captureCoordinator.generations[source]
+    Task {
+      do {
+        try await task.value
+      } catch is CancellationError {
+        return
+      } catch {
+        guard state.sessionID == sessionID, state.isActive,
+              captureCoordinator.generations[source] == generation else { return }
+        logger.error("Could not start \(source.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        state.setSource(source, active: false)
+      }
+    }
   }
 
   private func stopCapture(_ source: AudioSource) {
@@ -243,17 +287,21 @@ final class AlwaysOnController {
     case .systemAudio: SystemAudioCaptureManager.shared.stopStreaming()
     }
     sampleContinuations.removeValue(forKey: source)?.finish()
-    ingestTasks.removeValue(forKey: source)?.cancel()
+    let ingest = ingestTasks.removeValue(forKey: source)
+    if !isEndingSession { ingest?.cancel() }
     state.levels[source] = nil
   }
 
   private func startLevelPolling(_ transcriber: LiveTranscriber) {
     levelTask?.cancel()
+    let sessionID = state.sessionID
     levelTask = Task { [state] in
       while !Task.isCancelled {
         if !state.isPaused {
           for source in state.activeSources {
-            state.levels[source] = await transcriber.level(for: source)
+            let level = await transcriber.level(for: source)
+            guard !Task.isCancelled, state.sessionID == sessionID else { return }
+            if !state.isPaused, state.activeSources.contains(source) { state.levels[source] = level }
           }
         }
         try? await Task.sleep(for: .milliseconds(80))
@@ -264,6 +312,8 @@ final class AlwaysOnController {
   private func fail(_ error: Error) {
     let sessionID = state.sessionID
     logger.error("Always-On failed: \(error.localizedDescription, privacy: .public)")
+    AssistantService.shared.stop()
+    autoTrigger.reset()
     teardown()
     historyStore.endSession(id: sessionID, endedAt: Date(), cleanly: false)
     state.end()
@@ -271,14 +321,25 @@ final class AlwaysOnController {
   }
 
   private func teardown() {
-    stopCapture()
+    let pendingIngest = Array(ingestTasks.values)
+    isEndingSession = true
+    captureCoordinator.stopAll()
+    isEndingSession = false
     sessionTask?.cancel()
     sessionTask = nil
     levelTask?.cancel()
     levelTask = nil
+    // Its captured transcript is session-specific; let it persist the tail finals.
+    let pendingUpdates = updatesTask
     updatesTask = nil
     if let transcriber {
-      Task { await transcriber.shutdown() }
+      let previous = finalizationTask
+      finalizationTask = Task {
+        await previous?.value
+        for ingest in pendingIngest { await ingest.value }
+        await transcriber.finish()
+        await pendingUpdates?.value
+      }
     }
     transcriber = nil
   }

@@ -4,10 +4,16 @@
 //
 
 import XCTest
+import GRDB
 @testable import VoxNotch
 
 @MainActor
 final class AssistantServiceTests: XCTestCase {
+
+  private final class HistorySettings: AlwaysOnHistorySettingsProviding {
+    let saveHistory = true
+    let historyRetentionDays = 0
+  }
 
   private var state: AlwaysOnState!
 
@@ -113,5 +119,56 @@ final class AssistantServiceTests: XCTestCase {
 
     state.end()
     XCTAssertFalse(previous.handler(), "lets the key reach other apps once Always-On stops")
+  }
+
+  func testDiscardRemovesCompletedSpeculativeAnswerFromHistory() async throws {
+    let queue = try DatabaseQueue()
+    try DatabaseManager.makeMigrator().migrate(queue)
+    let history = AlwaysOnHistoryStore(databaseManager: queue, settings: HistorySettings())
+    let service = AssistantService(historyStore: history, makeStream: { _, _ in
+      AsyncThrowingStream { continuation in
+        continuation.yield("speculative")
+        continuation.finish()
+      }
+    })
+    let id = try XCTUnwrap(service.ask(trigger: .auto))
+    try await waitUntil { !service.isAnswering }
+    let saved = try await history.answers(for: state.sessionID)
+    XCTAssertEqual(saved.count, 1)
+    service.discard(id)
+    let remaining = try await history.answers(for: state.sessionID)
+    XCTAssertTrue(remaining.isEmpty)
+    XCTAssertTrue(state.answers.isEmpty)
+  }
+
+  func testStoppedAnswerCannotReappearInDeletedHistory() async throws {
+    let queue = try DatabaseQueue()
+    try DatabaseManager.makeMigrator().migrate(queue)
+    let history = AlwaysOnHistoryStore(databaseManager: queue, settings: HistorySettings())
+    let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
+    let service = AssistantService(historyStore: history, makeStream: { _, _ in stream })
+    service.ask(trigger: .manual)
+    continuation.yield("partial")
+    try await waitUntil { self.state.answers.first?.status == .streaming }
+    let sessionID = state.sessionID
+    service.stop()
+    try await history.deleteSession(id: sessionID)
+    continuation.finish()
+    await Task.yield()
+    let sessions = try await history.sessions()
+    XCTAssertTrue(sessions.isEmpty)
+    XCTAssertEqual(state.answers.first?.markdown, "partial", "stop flushes the buffered last token")
+  }
+
+  func testNewSessionDropsOldAnswerAndReleasesRequestOwnership() async throws {
+    let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
+    let service = AssistantService(makeStream: { _, _ in stream })
+    service.ask(trigger: .manual)
+    state.begin(sources: [.microphone])
+    continuation.yield("old session")
+    continuation.finish()
+    try await waitUntil { !service.isAnswering }
+    XCTAssertTrue(state.answers.isEmpty)
+    XCTAssertNil(service.currentAnswerID)
   }
 }

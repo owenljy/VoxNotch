@@ -77,4 +77,24 @@ final class AlwaysOnStateTests: XCTestCase {
     state.apply(update(.microphone, "hello there everyone", final: true, start: 0, end: 2))
     XCTAssertEqual(state.segments.count, 2)
   }
+
+  func testOverlappingSourcesAreOrderedBySpeechTimeNotFinalArrival() {
+    state.apply(update(.microphone, "Brief interruption.", final: true, start: 5, end: 6))
+    state.apply(update(.systemAudio, "Long question?", final: true, start: 0, end: 10))
+    XCTAssertEqual(state.segments.map(\.text), ["Long question?", "Brief interruption."])
+    XCTAssertEqual(state.lastFinalSegment?.text, "Long question?", "history must save the changed row, not segments.last")
+  }
+
+  func testOverlappingPartialStaysInChronologicalPosition() {
+    state.apply(update(.systemAudio, "Long question", final: false, start: 0, end: 10))
+    state.apply(update(.microphone, "Brief interruption.", final: true, start: 5, end: 6))
+    XCTAssertEqual(state.displayRows.map(\.source), [.systemAudio, .microphone])
+  }
+
+  func testEarlierFinalFromRestartedSourceIsNotAppendedToNewerText() {
+    state.apply(update(.microphone, "New device.", final: true, start: 3, end: 4))
+    state.apply(update(.microphone, "Old device.", final: true, start: 0, end: 2))
+    XCTAssertEqual(state.segments.map(\.text), ["Old device.", "New device."])
+    XCTAssertEqual(state.lastFinalSegment?.text, "Old device.")
+  }
 }
