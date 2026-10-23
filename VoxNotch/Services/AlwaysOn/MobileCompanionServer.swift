@@ -35,7 +35,15 @@ nonisolated struct MobileCompanionAddress: Identifiable, Equatable, Sendable {
 
 @MainActor @Observable
 final class MobileCompanionServer {
-  static let shared = MobileCompanionServer()
+  static let shared = MobileCompanionServer(
+    onReady: {
+      AlwaysOnPanelController.shared.hideForPhoneView()
+      SettingsWindowController.hideIfOpen()
+      MobileCompanionWindowController.shared.showForPairing()
+    },
+    onPaired: { MobileCompanionWindowController.shared.hideAfterPairing() },
+    onStopped: { MobileCompanionWindowController.shared.hide() }
+  )
 
   enum Status: Equatable {
     case off, starting, ready, failed(String)
@@ -52,8 +60,17 @@ final class MobileCompanionServer {
   @ObservationIgnored private var generation = UUID()
   @ObservationIgnored private let state: AlwaysOnState
   @ObservationIgnored private var router: MobileCompanionHTTP?
+  @ObservationIgnored private let onReady: () -> Void
+  @ObservationIgnored private let onPaired: () -> Void
+  @ObservationIgnored private let onStopped: () -> Void
 
-  init(state: AlwaysOnState? = nil) { self.state = state ?? .shared }
+  init(state: AlwaysOnState? = nil, onReady: @escaping () -> Void = {},
+       onPaired: @escaping () -> Void = {}, onStopped: @escaping () -> Void = {}) {
+    self.state = state ?? .shared
+    self.onReady = onReady
+    self.onPaired = onPaired
+    self.onStopped = onStopped
+  }
 
   func start(address: MobileCompanionAddress) {
     stop()
@@ -86,6 +103,7 @@ final class MobileCompanionServer {
             url.scheme = "http"; url.host = address.host; url.port = Int(port.rawValue); url.path = "/"; url.fragment = token
             self.accessURL = url.url
             self.status = .ready
+            self.onReady()
           case .failed(let error), .waiting(let error):
             self.stop()
             self.status = .failed("Could not connect: \(error.localizedDescription). Check Local Network permission and Wi-Fi.")
@@ -110,6 +128,7 @@ final class MobileCompanionServer {
   }
 
   func stop() {
+    let wasEnabled = isEnabled
     generation = UUID()
     listener?.stateUpdateHandler = nil
     listener?.newConnectionHandler = nil
@@ -123,6 +142,7 @@ final class MobileCompanionServer {
     address = nil
     hasConnectedClient = false
     status = .off
+    if wasEnabled { onStopped() }
   }
 
   func refreshLink() {
@@ -139,6 +159,7 @@ final class MobileCompanionServer {
       }
       if !self.hasConnectedClient, request.path == "/api/state", response.status == 200 || response.status == 304 {
         self.hasConnectedClient = true
+        self.onPaired()
       }
       return response
     } onClose: { [weak self] id in

@@ -92,6 +92,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alwaysOnItem.tag = Self.alwaysOnMenuTag
         menu.addItem(alwaysOnItem)
 
+        let showPanelItem = NSMenuItem(title: "Show Always-On Panel", action: #selector(toggleAlwaysOnPanel), keyEquivalent: "")
+        showPanelItem.tag = Self.alwaysOnPanelMenuTag
+        menu.addItem(showPanelItem)
+        let phoneViewItem = NSMenuItem(title: "Phone & iPad View…", action: #selector(openPhoneView), keyEquivalent: "")
+        phoneViewItem.tag = Self.phoneViewMenuTag
+        menu.addItem(phoneViewItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Settings
@@ -143,15 +150,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static let alwaysOnMenuTag = 104
+    private static let alwaysOnPanelMenuTag = 105
+    private static let phoneViewMenuTag = 106
 
     @objc private func toggleAlwaysOn() {
         AlwaysOnController.shared.toggle()
+    }
+
+    @objc private func toggleAlwaysOnPanel() {
+        guard AlwaysOnController.shared.isActive else { return }
+        let panel = AlwaysOnPanelController.shared
+        if panel.isPresented { panel.hideForPhoneView() }
+        else { panel.show() }
+    }
+
+    @objc private func openPhoneView() {
+        MobileCompanionWindowController.shared.show()
     }
 
     @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.tag == Self.alwaysOnMenuTag {
             menuItem.state = AlwaysOnController.shared.isActive ? .on : .off
         }
+        if menuItem.tag == Self.alwaysOnPanelMenuTag {
+            menuItem.title = AlwaysOnPanelController.shared.isPresented ? "Hide Always-On Panel" : "Show Always-On Panel"
+            return AlwaysOnController.shared.isActive
+        }
+        if menuItem.tag == Self.phoneViewMenuTag { return AlwaysOnController.shared.isActive }
         return true
     }
 

@@ -15,6 +15,14 @@ final class SettingsWindowController: NSWindowController {
 
   static let shared = SettingsWindowController()
 
+  /// Phone pairing has its own window, so an already-open settings page must
+  /// not leave a second QR or other Always-On controls visible on the Mac.
+  static func hideIfOpen() {
+    for window in NSApp.windows where window.windowController is SettingsWindowController {
+      window.orderOut(nil)
+    }
+  }
+
   // MARK: - Initialization
 
   private init() {

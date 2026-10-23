@@ -42,7 +42,7 @@ struct MobileCompanionView: View {
     VStack(alignment: .leading, spacing: 12) {
       Label("View on Phone", systemImage: "iphone")
         .font(.headline)
-      Text("Scan with your phone camera to see live transcription and AI answers. Keep both devices on the same Wi-Fi.")
+      Text("Scan with your phone or iPad camera to see live transcription and AI answers. Keep both devices on the same Wi-Fi.")
         .font(.caption)
         .foregroundStyle(.secondary)
 
@@ -72,6 +72,11 @@ struct MobileCompanionView: View {
           Spacer(minLength: 0)
         }
         Button("Turn Off Phone View", role: .destructive) { server.stop() }
+        Button(AlwaysOnPanelController.shared.isPresented ? "Hide Mac Pane" : "Show Mac Pane") {
+          let panel = AlwaysOnPanelController.shared
+          if panel.isPresented { panel.hideForPhoneView() }
+          else { panel.show() }
+        }
       } else {
         if addresses.count > 1 {
           HStack {
@@ -107,6 +112,10 @@ struct MobileCompanionView: View {
         }
       }
       Text("Read-only access. Anyone with this link can view the current session. Use trusted Wi-Fi; the local connection is not encrypted. Turning this off or stopping Always-On invalidates the link.")
+        .font(.system(size: 10))
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      Text("Enabling hides the Mac pane. The QR window closes after pairing. Reopen Phone View or the Mac pane from the menu bar.")
         .font(.system(size: 10))
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)

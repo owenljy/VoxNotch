@@ -170,7 +170,7 @@ final class MobileCompanionTests: XCTestCase {
     defer { server.stop() }
     server.start(address: .init(interface: "lo0", host: "127.0.0.1"))
     let url = try await readyURL(server)
-    let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    let view = makeWebView(width: 390, height: 844)
     let loaded = expectation(description: "served page loaded")
     let delegate = PageDelegate(loaded)
     view.navigationDelegate = delegate
@@ -201,7 +201,7 @@ final class MobileCompanionTests: XCTestCase {
   }
 
   func testMobileWebKitRendersCodeSafelyAndKeepsIndependentNavigation() async throws {
-    let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    let view = makeWebView(width: 390, height: 844)
     let loaded = expectation(description: "phone page loaded")
     let delegate = PageDelegate(loaded)
     view.navigationDelegate = delegate
@@ -259,6 +259,182 @@ final class MobileCompanionTests: XCTestCase {
     let old = try await view.evaluateJavaScript("document.getElementById('transcript-body').textContent.includes('question')") as? Bool
     XCTAssertEqual(old, false)
     withExtendedLifetime(delegate) {}
+  }
+
+  func testTabletAndSplitViewViewportsHaveTwoUsablePanesWithoutPageOverflow() async throws {
+    let view = makeWebView(width: 820, height: 1180)
+    try await loadPage(view)
+    try await apply(fixture(), to: view)
+    for (width, height, axis) in [(390, 844, "y"), (744, 1133, "y"), (768, 1024, "y"),
+                                (820, 1180, "y"), (1024, 1366, "y"), (1366, 1024, "x"),
+                                (1194, 834, "x"), (1024, 768, "x"), (678, 1024, "y"),
+                                (507, 1024, "y"), (320, 1024, "y")] {
+      try await resize(view, width: width, height: height)
+      let geometry = try await view.evaluateJavaScript("""
+        (() => {
+          const main = document.getElementById('panes'), a = document.querySelector('.transcript-pane').getBoundingClientRect(),
+                b = document.querySelector('.answer-pane').getBoundingClientRect(), d = document.getElementById('pane-divider').getBoundingClientRect();
+          return {axis: main.dataset.axis, fitsWidth: document.documentElement.scrollWidth <= innerWidth,
+                  fitsHeight: document.documentElement.scrollHeight <= innerHeight + 1,
+                  aWidth: a.width, bWidth: b.width, aHeight: a.height, bHeight: b.height,
+                  ordered: main.dataset.axis === 'y' ? a.bottom <= d.top + 1 && d.bottom <= b.top + 1 : a.right <= d.left + 1 && d.right <= b.left + 1};
+        })()
+        """) as? [String: Any]
+      let result = try XCTUnwrap(geometry)
+      XCTAssertEqual(result["axis"] as? String, axis, "\(width)x\(height)")
+      XCTAssertEqual(result["fitsWidth"] as? Bool, true, "\(width)x\(height)")
+      XCTAssertEqual(result["fitsHeight"] as? Bool, true, "\(width)x\(height)")
+      XCTAssertEqual(result["ordered"] as? Bool, true)
+      XCTAssertGreaterThan(try XCTUnwrap(result["aHeight"] as? Double), 100)
+      XCTAssertGreaterThan(try XCTUnwrap(result["bHeight"] as? Double), 100)
+      XCTAssertGreaterThan(try XCTUnwrap(result["aWidth"] as? Double), 180)
+      XCTAssertGreaterThan(try XCTUnwrap(result["bWidth"] as? Double), 180)
+      if [(820, 1180), (1366, 1024), (507, 1024)].contains(where: { $0 == (width, height) }) {
+        try await saveSnapshot(view, name: "ipad-\(width)x\(height)")
+      }
+    }
+  }
+
+  func testTouchMouseAndKeyboardResizeAndPersistIndependentSplits() async throws {
+    let view = makeWebView(width: 820, height: 1180)
+    try await loadPage(view)
+    _ = try await view.evaluateJavaScript("""
+      window.resizeGesture = (kind, delta, cancel = false) => {
+        const d = document.getElementById('pane-divider'), rect = d.getBoundingClientRect(), axis = document.getElementById('panes').dataset.axis;
+        // Synthetic PointerEvents cannot own a WebKit pointer. Stub capture only;
+        // all page handlers, sizing, bounds and cancellation still run normally.
+        let captured = null;
+        d.setPointerCapture = id => { captured = id; };
+        d.hasPointerCapture = id => captured === id;
+        d.releasePointerCapture = () => { captured = null; };
+        const start = {pointerId: 41, pointerType: kind, isPrimary: true, button: 0, buttons: 1,
+                       clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2};
+        d.dispatchEvent(new PointerEvent('pointerdown', start));
+        const moved = {...start, clientX: start.clientX + (axis === 'x' ? delta : 0), clientY: start.clientY + (axis === 'y' ? delta : 0)};
+        d.dispatchEvent(new PointerEvent('pointermove', moved));
+        d.dispatchEvent(new PointerEvent(cancel ? 'pointercancel' : 'pointerup', moved));
+        return Number(d.getAttribute('aria-valuenow'));
+      };
+      null;
+      """)
+    let moved = try await view.evaluateJavaScript("resizeGesture('touch', 150)") as? Double
+    XCTAssertGreaterThan(try XCTUnwrap(moved), 54)
+    let cancelled = try await view.evaluateJavaScript("resizeGesture('touch', -300, true)") as? Double
+    XCTAssertEqual(cancelled, moved)
+    let active = try await view.evaluateJavaScript("document.getElementById('panes').classList.contains('resizing')") as? Bool
+    XCTAssertEqual(active, false)
+    let clamped = try await view.evaluateJavaScript("resizeGesture('touch', 100000)") as? Double
+    XCTAssertLessThanOrEqual(try XCTUnwrap(clamped), 80)
+    _ = try await view.evaluateJavaScript("document.getElementById('pane-divider').dispatchEvent(new KeyboardEvent('keydown', {key:'Home'}))")
+    let minimum = try await view.evaluateJavaScript("document.getElementById('pane-divider').getAttribute('aria-valuenow')") as? String
+    XCTAssertEqual(minimum, "20")
+    _ = try await view.evaluateJavaScript("document.getElementById('pane-divider').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown'}))")
+    let stepped = try await view.evaluateJavaScript("document.getElementById('pane-divider').getAttribute('aria-valuenow')") as? String
+    XCTAssertEqual(stepped, "22")
+    _ = try await view.evaluateJavaScript("document.getElementById('reset-split').click(); document.getElementById('layout-mode').value = 'columns'; document.getElementById('layout-mode').dispatchEvent(new Event('change'))")
+    let horizontal = try await view.evaluateJavaScript("resizeGesture('mouse', 120)") as? Double
+    XCTAssertGreaterThan(try XCTUnwrap(horizontal), 58)
+    try await resize(view, width: 507, height: 1024)
+    let narrow = try await view.evaluateJavaScript("document.getElementById('panes').dataset.axis") as? String
+    XCTAssertEqual(narrow, "y")
+    try await resize(view, width: 820, height: 1180)
+    let restored = try await view.evaluateJavaScript("Number(document.getElementById('pane-divider').getAttribute('aria-valuenow'))") as? Double
+    XCTAssertEqual(restored, horizontal)
+    try await loadPage(view)
+    let persisted = try await view.evaluateJavaScript("({mode:document.getElementById('layout-mode').value, ratio:Number(document.getElementById('pane-divider').getAttribute('aria-valuenow')), vertical:JSON.parse(localStorage.getItem('voxnotchMobileLayout')).y})") as? [String: Any]
+    XCTAssertEqual(persisted?["mode"] as? String, "columns")
+    XCTAssertEqual(persisted?["ratio"] as? Double, horizontal)
+    XCTAssertEqual(persisted?["vertical"] as? Double, 0.44)
+  }
+
+  func testEnableHidesMacPaneButKeepsIndependentQRUntilAuthenticatedPairing() async throws {
+    let state = fixture(), panel = AlwaysOnPanelController.shared
+    var server: MobileCompanionServer!
+    let qrWindow = MobileCompanionWindowController(content: { AnyView(MobileCompanionView(server: server, state: state)) })
+    var readyCount = 0
+    server = MobileCompanionServer(state: state, onReady: { [weak qrWindow] in
+      readyCount += 1
+      panel.hideForPhoneView()
+      qrWindow?.showForPairing()
+    }, onPaired: { [weak qrWindow] in qrWindow?.hideAfterPairing() },
+       onStopped: { [weak qrWindow] in qrWindow?.hide() })
+    defer { server.stop(); qrWindow.close(); panel.hideForPhoneView() }
+    panel.show()
+    XCTAssertTrue(panel.isPresented)
+    server.start(address: .init(interface: "lo0", host: "127.0.0.1"))
+    let url = try await readyURL(server)
+    XCTAssertEqual(readyCount, 1)
+    XCTAssertFalse(panel.isPresented)
+    XCTAssertTrue(state.isActive, "hiding must not stop capture or clear the session")
+    XCTAssertEqual(qrWindow.window?.isVisible, true)
+    XCTAssertNil(qrWindow.window?.parent, "the QR must survive the hidden pane/popover")
+    var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+    components.fragment = nil; components.path = "/api/state"
+    var request = URLRequest(url: try XCTUnwrap(components.url))
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    _ = try await session.data(for: request)
+    XCTAssertEqual(qrWindow.window?.isVisible, true, "an unauthenticated request must not dismiss pairing")
+    request.setValue("Bearer \(try XCTUnwrap(url.fragment))", forHTTPHeaderField: "Authorization")
+    _ = try await session.data(for: request)
+    XCTAssertEqual(qrWindow.window?.isVisible, false)
+    XCTAssertFalse(panel.isPresented)
+    XCTAssertTrue(state.isActive)
+    qrWindow.show()
+    _ = try await session.data(for: request)
+    XCTAssertEqual(qrWindow.window?.isVisible, true, "manually reopening controls stays open")
+    server.refreshLink()
+    _ = try await readyURL(server)
+    XCTAssertEqual(readyCount, 2)
+    XCTAssertEqual(qrWindow.window?.isVisible, true)
+    server.stop()
+    XCTAssertEqual(qrWindow.window?.isVisible, false)
+    XCTAssertFalse(panel.isPresented, "stopping phone sharing must not unexpectedly expose desktop text")
+  }
+
+  func testFailedEnableDoesNotHideTheMacPane() {
+    let panel = AlwaysOnPanelController.shared
+    let state = fixture()
+    let server = MobileCompanionServer(state: state, onReady: { panel.hideForPhoneView() })
+    defer { server.stop(); panel.hideForPhoneView() }
+    panel.show()
+    server.start(address: .init(interface: "invalid", host: "not-an-address"))
+    XCTAssertTrue(panel.isPresented)
+    XCTAssertFalse(server.isEnabled)
+  }
+
+  private func makeWebView(width: Int, height: Int) -> WKWebView {
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    return WKWebView(frame: CGRect(x: 0, y: 0, width: width, height: height), configuration: configuration)
+  }
+
+  private func loadPage(_ view: WKWebView) async throws {
+    let loaded = expectation(description: "layout page loaded")
+    let delegate = PageDelegate(loaded)
+    view.navigationDelegate = delegate
+    view.loadHTMLString(MobileCompanionPage.html, baseURL: URL(string: "http://127.0.0.1:8123/"))
+    await fulfillment(of: [loaded], timeout: 10)
+    withExtendedLifetime(delegate) {}
+  }
+
+  private func resize(_ view: WKWebView, width: Int, height: Int) async throws {
+    view.frame.size = CGSize(width: width, height: height)
+    view.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(50))
+    let expected = "innerWidth === \(width) && innerHeight === \(height)"
+    let resized = try await view.evaluateJavaScript(expected) as? Bool
+    XCTAssertEqual(resized, true)
+  }
+
+  private func saveSnapshot(_ view: WKWebView, name: String) async throws {
+    let image = try await view.takeSnapshot(configuration: nil)
+    let attachment = XCTAttachment(image: image)
+    attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+    if let data = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: data),
+       let png = bitmap.representation(using: .png, properties: [:]) {
+      try? png.write(to: URL(fileURLWithPath: "/private/tmp/voxnotch-\(name).png"))
+    }
   }
 
   private func readyURL(_ server: MobileCompanionServer) async throws -> URL {

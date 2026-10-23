@@ -136,6 +136,90 @@ nonisolated enum MobileCompanionPage {
     $('answer-meta').textContent = ''; $('page').textContent = '0/0'; $('history').disabled = true;
     $('follow').disabled = true; $('status').textContent = message; $('status').dataset.live = 'false';
   }
+
+  // Each device owns its layout. Rotating or entering iPad Split View keeps a
+  // separate split for stacked and side-by-side panes.
+  const panes = $('panes'), divider = $('pane-divider'), layoutMode = $('layout-mode');
+  const defaults = {mode: 'auto', x: 0.45, y: 0.44};
+  let layout = {...defaults}, drag = null;
+  try {
+    const saved = JSON.parse(localStorage.getItem('voxnotchMobileLayout') || 'null');
+    if (saved && ['auto', 'stacked', 'columns'].includes(saved.mode)) {
+      layout.mode = saved.mode;
+      for (const axis of ['x', 'y']) if (Number.isFinite(saved[axis])) layout[axis] = Math.min(0.8, Math.max(0.2, saved[axis]));
+    }
+  } catch (_) { /* Layout still works when browser storage is unavailable. */ }
+  layoutMode.value = layout.mode;
+  const saveLayout = () => { try { localStorage.setItem('voxnotchMobileLayout', JSON.stringify(layout)); } catch (_) {} };
+  function splitBounds(axis) {
+    const rect = panes.getBoundingClientRect(), handle = divider.getBoundingClientRect();
+    const available = Math.max(1, axis === 'x' ? rect.width - handle.width : rect.height - handle.height);
+    const minimum = Math.min(0.45, Math.max(0.2, (axis === 'x' ? 180 : 120) / available));
+    return {available, minimum, maximum: 1 - minimum};
+  }
+  function setSplit(axis, value, remember = true) {
+    const bounds = splitBounds(axis);
+    const fraction = Math.min(bounds.maximum, Math.max(bounds.minimum, value));
+    if (remember) layout[axis] = fraction;
+    panes.style.setProperty('--split-' + axis, String(fraction));
+    divider.setAttribute('aria-valuemin', Math.round(bounds.minimum * 100));
+    divider.setAttribute('aria-valuemax', Math.round(bounds.maximum * 100));
+    divider.setAttribute('aria-valuenow', Math.round(fraction * 100));
+    divider.setAttribute('aria-valuetext', `Transcript ${Math.round(fraction * 100)} percent`);
+  }
+  function updateLayout() {
+    const wide = panes.clientWidth >= 600;
+    const columns = wide && (layout.mode === 'columns' || (layout.mode === 'auto' && matchMedia('(min-width:750px) and (orientation:landscape)').matches));
+    const axis = columns ? 'x' : 'y';
+    panes.dataset.axis = axis;
+    divider.setAttribute('aria-orientation', columns ? 'vertical' : 'horizontal');
+    setSplit(axis, layout[axis], false);
+  }
+  function finishDrag(commit) {
+    if (!drag) return;
+    const previous = drag; drag = null;
+    panes.classList.remove('resizing');
+    if (divider.hasPointerCapture(previous.id)) divider.releasePointerCapture(previous.id);
+    if (!commit) setSplit(previous.axis, previous.preference);
+    else saveLayout();
+  }
+  divider.addEventListener('pointerdown', event => {
+    if (drag || !event.isPrimary || event.button !== 0) return;
+    const axis = panes.dataset.axis;
+    drag = {id: event.pointerId, axis, coordinate: axis === 'x' ? event.clientX : event.clientY,
+            fraction: Number(panes.style.getPropertyValue('--split-' + axis)), preference: layout[axis], available: splitBounds(axis).available};
+    divider.setPointerCapture(event.pointerId);
+    panes.classList.add('resizing');
+    event.preventDefault();
+  });
+  divider.addEventListener('pointermove', event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const coordinate = drag.axis === 'x' ? event.clientX : event.clientY;
+    setSplit(drag.axis, drag.fraction + (coordinate - drag.coordinate) / drag.available);
+    event.preventDefault();
+  });
+  divider.addEventListener('pointerup', event => { if (drag?.id === event.pointerId) finishDrag(true); });
+  divider.addEventListener('pointercancel', event => { if (drag?.id === event.pointerId) finishDrag(false); });
+  divider.addEventListener('lostpointercapture', () => finishDrag(false));
+  divider.addEventListener('keydown', event => {
+    const axis = panes.dataset.axis, bounds = splitBounds(axis);
+    const keys = axis === 'x' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+    let value = Number(panes.style.getPropertyValue('--split-' + axis));
+    if (event.key === keys[0]) value -= event.shiftKey ? 0.1 : 0.02;
+    else if (event.key === keys[1]) value += event.shiftKey ? 0.1 : 0.02;
+    else if (event.key === 'Home') value = bounds.minimum;
+    else if (event.key === 'End') value = bounds.maximum;
+    else return;
+    event.preventDefault(); setSplit(axis, value); saveLayout();
+  });
+  function resetSplit() { finishDrag(false); setSplit(panes.dataset.axis, defaults[panes.dataset.axis]); saveLayout(); }
+  divider.addEventListener('dblclick', resetSplit);
+  $('reset-split').addEventListener('click', resetSplit);
+  layoutMode.addEventListener('change', () => { finishDrag(false); layout.mode = layoutMode.value; updateLayout(); saveLayout(); });
+  window.addEventListener('resize', () => { finishDrag(false); updateLayout(); });
+  new ResizeObserver(updateLayout).observe(panes);
+  updateLayout();
+
   let token = location.hash.slice(1);
   if (token) { history.replaceState(null, '', location.pathname); }
   try {
@@ -176,21 +260,25 @@ nonisolated enum MobileCompanionPage {
   <style>
   :root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#111214;color:#f5f5f7;font-size:15px}
   *{box-sizing:border-box}body{margin:0;height:100vh;height:100dvh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-  header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #ffffff15;min-height:52px}header strong{font-size:14px;letter-spacing:-.3px;white-space:nowrap}
-  #status{font-size:11px;color:#a4a5ab;text-align:right;max-width:70%}#status[data-live=true]{color:#68d699}#status[data-live=true]:before{content:'● ';font-size:9px}
-  main{display:flex;flex-direction:column;flex:1;min-height:0}.pane{display:flex;flex-direction:column;min-height:0;min-width:0}.transcript-pane{flex:0 0 44%;border-bottom:1px solid #ffffff20}.answer-pane{flex:1;background:#191a1d}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 18px;border-bottom:1px solid #ffffff15;min-height:52px;flex-shrink:0}header strong{font-size:14px;letter-spacing:-.3px;white-space:nowrap}
+  .view-controls{display:flex;align-items:center;gap:5px;flex-shrink:0}#layout-mode{font:inherit;font-size:11px;color:#d4d6dc;background:#24262b;border:1px solid #ffffff20;border-radius:8px;padding:7px 5px;min-height:34px;max-width:105px}#reset-split{font-size:17px;padding:4px 8px;min-width:34px;border-radius:8px}
+  #status{font-size:11px;color:#a4a5ab;text-align:right;min-width:0;overflow-wrap:anywhere}#status[data-live=true]{color:#68d699}#status[data-live=true]:before{content:'● ';font-size:9px}
+  main{--divider-size:28px;--split-y:.44;--split-x:.45;display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}.pane{display:flex;flex-direction:column;min-height:0;min-width:0}.transcript-pane{flex:0 0 calc((100% - var(--divider-size)) * var(--split-y))}.answer-pane{flex:1;background:#191a1d}
+  #pane-divider{flex:0 0 var(--divider-size);display:flex;align-items:center;justify-content:center;cursor:row-resize;touch-action:none;outline:none;background:#151619;border-block:1px solid #ffffff12}#pane-divider:before{content:'';width:38px;height:4px;border-radius:4px;background:#63666e}#pane-divider:hover:before,#pane-divider:focus-visible:before,.resizing #pane-divider:before{background:#66b8ff}.resizing{user-select:none;-webkit-user-select:none}
+  main[data-axis=x]{flex-direction:row}main[data-axis=x] .transcript-pane{flex-basis:calc((100% - var(--divider-size)) * var(--split-x))}main[data-axis=x] #pane-divider{cursor:col-resize;border-block:0;border-inline:1px solid #ffffff12}main[data-axis=x] #pane-divider:before{height:38px;width:4px}
   .pane-heading{font-size:10px;letter-spacing:1px;color:#92949b;font-weight:650;margin:0;padding:13px 18px 6px}.scroll{overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;min-height:0;padding:8px 18px 20px;overflow-wrap:anywhere}
   .transcript-row{display:grid;grid-template-columns:35px 1fr;gap:8px;line-height:1.65;margin-bottom:10px}.speaker{font-size:9px;letter-spacing:.8px;font-weight:750;padding-top:4px}.me{color:#4dd68f}.them{color:#66b8ff}.partial{opacity:.65}
   .answer-heading{display:flex;align-items:center;gap:12px;padding:8px 18px 0;min-height:44px}input[type=range]{min-width:0;width:100%;accent-color:#e0e3ea;height:28px;cursor:pointer;touch-action:pan-x}#page{font-size:11px;color:#a4a5ab;font-variant-numeric:tabular-nums;white-space:nowrap}
   button{font:inherit;font-size:11px;border:1px solid #ffffff22;border-radius:20px;padding:8px 10px;background:#ffffff0d;color:#e5e5e9;white-space:nowrap;min-height:34px}button:disabled{color:#83868d;border-color:transparent;background:transparent}
   #answer-meta{font-size:10px;color:#92949b;margin:0;padding:2px 18px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.markdown{font-size:15px;line-height:1.65}.markdown>*:first-child{margin-top:0}.markdown p{white-space:pre-wrap;margin:0 0 12px}.markdown h2,.markdown h3{font-size:17px;line-height:1.4;margin:16px 0 8px}.markdown h4,.markdown h5,.markdown h6{font-size:15px;margin:14px 0 6px}
   .markdown ul,.markdown ol{padding-left:22px;margin:8px 0 14px}.markdown li{margin:4px 0}.markdown pre{font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:auto;overflow-wrap:normal;white-space:pre;background:#101114;border:1px solid #ffffff12;border-radius:9px;padding:12px;tab-size:4;margin:12px 0}.markdown code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:#ffffff0b;border-radius:4px;padding:2px 4px}.markdown blockquote{border-left:2px solid #66b8ff88;color:#b5b7be;padding-left:12px;margin:12px 0}.table-wrap{overflow:auto}table{border-collapse:collapse;font-size:12px;margin:8px 0 14px}td,th{border:1px solid #ffffff20;padding:6px 9px;text-align:left;white-space:nowrap}.muted{font-size:13px;line-height:1.6;color:#92949b}.error{color:#f4ba79}a{color:inherit}
-  @media(min-width:750px) and (orientation:landscape){main{flex-direction:row}.transcript-pane{flex:0 0 45%;border-bottom:0;border-right:1px solid #ffffff20}.answer-pane{flex:1}}
+  @media(min-width:700px){:root,.markdown{font-size:16px}.pane-heading{font-size:11px}.scroll{padding-inline:22px}header{padding-inline:22px}}
   @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
   </style></head><body>
-  <header><strong>VoxNotch</strong><span id="status" role="status">Connecting…</span></header>
-  <main>
+  <header><strong>VoxNotch</strong><div class="view-controls"><select id="layout-mode" aria-label="Pane layout"><option value="auto">Auto layout</option><option value="stacked">Stacked</option><option value="columns">Side by side</option></select><button id="reset-split" aria-label="Reset pane sizes" title="Reset pane sizes">↺</button></div><span id="status" role="status">Connecting…</span></header>
+  <main id="panes" data-axis="y">
     <section class="pane transcript-pane" aria-label="Live transcript"><h1 class="pane-heading">LIVE TRANSCRIPT</h1><div class="scroll" id="transcript"><div id="transcript-body"><p class="muted">Connecting to your Mac…</p></div></div></section>
+    <div id="pane-divider" role="separator" tabindex="0" aria-label="Resize transcript and answers" aria-controls="transcript answer" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="80" aria-valuenow="44"></div>
     <section class="pane answer-pane" aria-label="AI answers"><h2 class="pane-heading">AI ANSWERS</h2><div class="answer-heading"><input id="history" type="range" min="0" max="0" value="0" disabled aria-label="Browse answers"><span id="page">0/0</span><button id="follow" disabled>Following Mac</button></div><p id="answer-meta"></p><div class="scroll markdown" id="answer"><div id="answer-body"><p class="muted">Waiting for an answer from your Mac.</p></div></div></section>
   </main><script>\(javascript)</script></body></html>
   """

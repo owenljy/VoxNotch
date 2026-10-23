@@ -72,6 +72,15 @@ final class AlwaysOnPanelController {
     }
   }
 
+  /// Phone viewing hides the desktop text immediately while keeping capture
+  /// and answer generation running. The pairing QR lives in a separate window.
+  func hideForPhoneView() {
+    hideTask?.cancel()
+    hideTask = nil
+    isPresented = false
+    panel?.orderOut(nil)
+  }
+
   func toggleMinimized() {
     guard dragStart == nil, resizeStart == nil else { return }
     let top = contentFrame.maxY

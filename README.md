@@ -60,12 +60,21 @@ ticks. Move away to restore the previous answer, click to lock a page, or
 double-click to unlock and return. The lock button offers the same toggle;
 ⌃⌘← / ⌃⌘→ still navigate between answers.
 
-To view both panes on your phone, connect it to the same Wi-Fi as your Mac.
+To view both panes on your phone or iPad, connect it to the same Wi-Fi as your Mac.
 Click the phone icon next to Ask (or open Settings → Always-On → Phone View),
 choose **Enable Phone View**, and scan the QR code with your phone camera.
-The browser shows live partial transcripts and streaming answers; portrait uses
-stacked panes and landscape uses side-by-side panes. Browse answers independently
+The browser shows live partial transcripts and streaming answers. Drag the middle
+divider to resize the panes. Auto layout adapts to portrait, landscape and iPad
+Split View; the layout selector also offers Stacked and Side by side. The reset
+button restores the split. Browse answers independently
 with the slider, or choose **Follow Mac** to mirror the Mac's selected answer.
+
+Enabling Phone View hides the Mac's Always-On pane and any open Settings window
+while transcription continues.
+An independent QR window remains for scanning and closes after a device pairs.
+Use the menu bar's **Phone & iPad View…** to reopen connection controls, or
+**Show Always-On Panel** to bring back the Mac pane. Connection failure or turning
+Phone View off does not automatically reveal the Mac's text.
 
 Phone View is read-only and off by default. It shares only the current session's
 text over your local network, with no relay service or phone app required. Anyone
