@@ -55,6 +55,11 @@ supported. Ask with ⌃⌘↩ or enable automatic answers after questions and pa
 Prompt templates, vocabulary hints, input devices, answer text and panel
 appearance can be changed in Settings or from the panel.
 
+The horizontal rail above Ask previews earlier answers as you move across its
+ticks. Move away to restore the previous answer, click to lock a page, or
+double-click to unlock and return. The lock button offers the same toggle;
+⌃⌘← / ⌃⌘→ still navigate between answers.
+
 Final transcripts and answers are saved locally by default. Saving and retention
 can be changed in Settings. The Always-On history browser requires macOS 26+.
 AI requests include the selected transcript window and, when enabled, earlier

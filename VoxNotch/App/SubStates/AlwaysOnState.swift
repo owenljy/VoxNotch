@@ -39,13 +39,46 @@ final class AlwaysOnState {
   /// AI answers, oldest first.
   private(set) var answers: [AssistantAnswer] = []
 
-  /// Answer pinned by the pager; nil follows the latest answer.
-  var selectedAnswerID: UUID?
+  /// Committed keyboard selection; nil follows the latest answer.
+  private(set) var selectedAnswerID: UUID?
+
+  private enum AnswerBrowsing {
+    case idle
+    case preview(answer: UUID, origin: UUID)
+    case locked(answer: UUID, origin: UUID)
+
+    var answerID: UUID? {
+      switch self {
+      case .idle: nil
+      case .preview(let answer, _), .locked(let answer, _): answer
+      }
+    }
+
+    var originID: UUID? {
+      switch self {
+      case .idle: nil
+      case .preview(_, let origin), .locked(_, let origin): origin
+      }
+    }
+  }
+
+  private var answerBrowsing: AnswerBrowsing = .idle
+
+  var isAnswerLocked: Bool {
+    if case .locked = answerBrowsing { return true }
+    return false
+  }
+
+  var isPreviewingAnswer: Bool {
+    if case .preview = answerBrowsing { return true }
+    return false
+  }
 
   private static let maxAnswers = 50
 
   var displayedAnswer: AssistantAnswer? {
-    if let selectedAnswerID, let answer = answers.first(where: { $0.id == selectedAnswerID }) {
+    if let id = answerBrowsing.answerID ?? selectedAnswerID,
+       let answer = answers.first(where: { $0.id == id }) {
       return answer
     }
     return answers.last
@@ -96,6 +129,7 @@ final class AlwaysOnState {
     partials = [:]
     answers = []
     selectedAnswerID = nil
+    answerBrowsing = .idle
     levels = [:]
     activeSources = sources
     startedAt = nil
@@ -125,6 +159,7 @@ final class AlwaysOnState {
     partials = [:]
     answers = []
     selectedAnswerID = nil
+    answerBrowsing = .idle
     revision += 1
   }
 
@@ -134,11 +169,12 @@ final class AlwaysOnState {
     answers.append(answer)
     if answers.count > Self.maxAnswers { answers.removeFirst(answers.count - Self.maxAnswers) }
     selectedAnswerID = nil
+    reconcileAnswerBrowsing()
   }
 
   func removeAnswer(_ id: UUID) {
     answers.removeAll { $0.id == id }
-    if selectedAnswerID == id { selectedAnswerID = nil }
+    reconcileAnswerBrowsing()
   }
 
   func updateAnswer(_ id: UUID, _ change: (inout AssistantAnswer) -> Void) {
@@ -149,7 +185,56 @@ final class AlwaysOnState {
   func showAnswer(offset: Int) {
     guard let index = displayedAnswerIndex else { return }
     let target = min(max(index + offset, 0), answers.count - 1)
+    answerBrowsing = .idle
     selectedAnswerID = target == answers.count - 1 ? nil : answers[target].id
+  }
+
+  /// Hovering never changes the committed page. The origin uses an ID so a new
+  /// answer arriving during a preview cannot change the page we return to.
+  func previewAnswer(_ id: UUID) {
+    guard !isAnswerLocked, answers.contains(where: { $0.id == id }),
+          let origin = answerBrowsing.originID ?? displayedAnswer?.id else { return }
+    if answerBrowsing.answerID != id {
+      answerBrowsing = .preview(answer: id, origin: origin)
+    }
+  }
+
+  func endAnswerPreview() {
+    guard isPreviewingAnswer else { return }
+    restoreAnswerOrigin()
+  }
+
+  func lockAnswer(_ id: UUID) {
+    guard answers.contains(where: { $0.id == id }),
+          let origin = answerBrowsing.originID ?? displayedAnswer?.id else { return }
+    answerBrowsing = .locked(answer: id, origin: origin)
+  }
+
+  func unlockAnswer() {
+    restoreAnswerOrigin()
+  }
+
+  private func restoreAnswerOrigin() {
+    guard let origin = answerBrowsing.originID else { return }
+    selectedAnswerID = answers.contains(where: { $0.id == origin }) && origin != answers.last?.id ? origin : nil
+    answerBrowsing = .idle
+  }
+
+  private func reconcileAnswerBrowsing() {
+    if let selectedAnswerID, !answers.contains(where: { $0.id == selectedAnswerID }) {
+      self.selectedAnswerID = nil
+    }
+    guard let id = answerBrowsing.answerID else { return }
+    guard answers.contains(where: { $0.id == id }) else {
+      restoreAnswerOrigin()
+      return
+    }
+    // The bounded history may evict the origin while its preview is still open.
+    guard let origin = answerBrowsing.originID,
+          !answers.contains(where: { $0.id == origin }), let fallback = answers.last?.id else { return }
+    answerBrowsing = isAnswerLocked
+      ? .locked(answer: id, origin: fallback)
+      : .preview(answer: id, origin: fallback)
   }
 
   func clearPartials() {

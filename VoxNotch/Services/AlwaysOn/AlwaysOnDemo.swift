@@ -37,6 +37,10 @@ enum AlwaysOnDemo {
     let state = AlwaysOnState.shared
     AlwaysOnPanelController.shared.show()
     state.begin(sources: [.microphone, .systemAudio])
+    if UserDefaults.standard.bool(forKey: "alwaysOnDemoNavigation") {
+      startNavigationDemo(state)
+      return
+    }
     AudioDeviceMonitor.shared.start()
     if UserDefaults.standard.bool(forKey: "alwaysOnDemoPreparing") {
       Task {
@@ -101,6 +105,49 @@ enum AlwaysOnDemo {
     SELECT step, COUNT(*) FROM onboarding_events GROUP BY step;
     ```
     """
+
+  /// Synthetic history only: no microphone capture or provider requests.
+  private static func startNavigationDemo(_ state: AlwaysOnState) {
+    state.status = .running
+    state.startedAt = Date().addingTimeInterval(-754)
+    let now = Date()
+    for (index, line) in script.enumerated() {
+      let start = now.addingTimeInterval(Double(index) * 5)
+      state.apply(update(UUID(), line.0, line.1, final: true, start: start, end: start.addingTimeInterval(3)))
+    }
+    for index in 1...12 {
+      var answer = AssistantAnswer(id: UUID(), createdAt: now, trigger: .manual, model: "Demo")
+      answer.templateName = "General"
+      answer.status = .done
+      answer.markdown = index == 12 ? sampleAnswer : """
+        ### Answer \(index)
+
+        \(index == 3 ? "Start with the activation funnel and compare each onboarding step before and after the redesign." : "Use a focused experiment to validate the retention hypothesis.")
+
+        - Check cohort retention and activation rates.
+        - Identify the step with the largest drop-off.
+        - Test a shorter onboarding flow with one clear success metric.
+        """
+      state.appendAnswer(answer)
+    }
+    if let path = UserDefaults.standard.string(forKey: "alwaysOnDemoSnapshots") {
+      let dir = URL(fileURLWithPath: path)
+      Task {
+        try? await Task.sleep(for: .seconds(1))
+        let panel = AlwaysOnPanelController.shared
+        panel.debugSnapshot(to: dir.appendingPathComponent("navigation-latest.png"))
+        state.previewAnswer(state.answers[2].id)
+        try? await Task.sleep(for: .milliseconds(300))
+        panel.debugSnapshot(to: dir.appendingPathComponent("navigation-preview.png"))
+        state.lockAnswer(state.answers[2].id)
+        try? await Task.sleep(for: .milliseconds(300))
+        panel.debugSnapshot(to: dir.appendingPathComponent("navigation-locked.png"))
+        state.unlockAnswer()
+        try? await Task.sleep(for: .milliseconds(300))
+        panel.debugSnapshot(to: dir.appendingPathComponent("navigation-returned.png"))
+      }
+    }
+  }
 
   private static func captureSnapshots(into dir: URL) {
     let panel = AlwaysOnPanelController.shared
