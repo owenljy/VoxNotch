@@ -90,7 +90,8 @@ nonisolated enum AssistantPromptBuilder {
       Speech-recognition notes: the transcript comes from an automatic recognizer that often \
       mishears technical terms, especially words that sound alike. When the context supports it, \
       silently read them as the intended term and always use the correct term in your answer. \
-      Never point out or correct the transcript itself.
+      Never mention speech recognition, transcription or misheard words, and never suggest asking \
+      anyone to confirm what was said — just answer as if the correct term had been spoken.
       """
     if !hints.isEmpty {
       notes += "\nCommon mishearings (heard → meant):\n" + hints.map { "- \($0)" }.joined(separator: "\n")
