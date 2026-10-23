@@ -22,6 +22,7 @@ final class AssistantSettings {
     static let model = "assistant.model"
     static let temperature = "assistant.temperature"
     static let maxTokens = "assistant.maxTokens"
+    static let reasoningEffort = "assistant.reasoningEffort"
     static let textColorHex = "assistant.textColorHex"
     static let answerTextColorHex = "assistant.answerTextColorHex"
     static let answerFontSize = "assistant.answerFontSize"
@@ -98,6 +99,40 @@ final class AssistantSettings {
 
   /// Read from the Keychain on first use, never at launch: with ad-hoc signed builds a
   /// changed signature makes macOS show a blocking Keychain prompt on access.
+  enum ReasoningEffort: String, CaseIterable, Sendable {
+    /// "low" for models known to reason (gpt-oss); omitted for everything else.
+    case automatic
+    /// Never send the parameter.
+    case off
+    case none
+    case low
+    case medium
+    case high
+
+    var label: String {
+      switch self {
+      case .automatic: "Automatic"
+      case .off: "Off (don't send)"
+      case .none: "None"
+      case .low: "Low"
+      case .medium: "Medium"
+      case .high: "High"
+      }
+    }
+
+    func value(forModel model: String) -> String? {
+      switch self {
+      case .automatic: model.lowercased().contains("gpt-oss") ? "low" : nil
+      case .off: nil
+      default: rawValue
+      }
+    }
+  }
+
+  var reasoningEffort: ReasoningEffort {
+    didSet { UserDefaults.standard.set(reasoningEffort.rawValue, forKey: Keys.reasoningEffort) }
+  }
+
   var apiKey: String {
     get {
       access(keyPath: \.apiKey)
@@ -340,12 +375,14 @@ final class AssistantSettings {
   }
 
   var providerConfig: OpenAICompatibleConfig {
-    OpenAICompatibleConfig(
+    let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+    return OpenAICompatibleConfig(
       baseURL: baseURL,
       apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
-      model: model.trimmingCharacters(in: .whitespacesAndNewlines),
+      model: trimmedModel,
       temperature: temperature,
-      maxTokens: maxTokens
+      maxTokens: maxTokens,
+      reasoningEffort: reasoningEffort.value(forModel: trimmedModel)
     )
   }
 
@@ -365,6 +402,7 @@ final class AssistantSettings {
     model = defaults.string(forKey: Keys.model) ?? Defaults.model
     temperature = defaults.object(forKey: Keys.temperature) as? Double ?? Defaults.temperature
     maxTokens = defaults.object(forKey: Keys.maxTokens) as? Int ?? Defaults.maxTokens
+    reasoningEffort = defaults.string(forKey: Keys.reasoningEffort).flatMap(ReasoningEffort.init) ?? .automatic
 
     promptTemplateID = defaults.string(forKey: Keys.promptTemplateID) ?? AssistantPromptTemplate.general.id
     var overrides = defaults.dictionary(forKey: Keys.promptOverrides) as? [String: String] ?? [:]

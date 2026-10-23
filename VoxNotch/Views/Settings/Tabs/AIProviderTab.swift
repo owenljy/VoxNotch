@@ -131,10 +131,26 @@ struct AIProviderTab: View {
           InfoLabel(title: "Max answer tokens", tooltip: "Upper bound on answer length. Shorter answers finish faster.")
         }
       }
+
+      Picker(selection: $settings.reasoningEffort) {
+        ForEach(AssistantSettings.ReasoningEffort.allCases, id: \.self) { effort in
+          Text(effort.label).tag(effort)
+        }
+      } label: {
+        InfoLabel(
+          title: "Reasoning effort",
+          tooltip: "How much a reasoning model thinks before answering (sent as reasoning_effort). More thinking means a slower first token. Automatic sends Low for gpt-oss models and nothing for others. If a provider rejects it, VoxNotch retries without it."
+        )
+      }
+      if let sent = settings.reasoningEffort.value(forModel: settings.model.trimmingCharacters(in: .whitespaces)) {
+        Text("Sends reasoning_effort: \(sent)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
     } header: {
       Text("Model")
     } footer: {
-      Text("For live answers, fast non-reasoning models give the lowest latency.")
+      Text("For live answers, fast models give the lowest latency. With reasoning models such as openai/gpt-oss-120b, keep reasoning effort Low.")
     }
   }
 

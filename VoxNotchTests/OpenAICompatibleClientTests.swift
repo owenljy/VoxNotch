@@ -104,4 +104,55 @@ final class OpenAICompatibleClientTests: XCTestCase {
       XCTFail("429 should map to rateLimited")
     }
   }
+
+  // MARK: - Reasoning Effort
+
+  func testReasoningEffortSentAndDroppedOnRejection() throws {
+    var cfg = config()
+    cfg.reasoningEffort = "low"
+    let request = try OpenAICompatibleClient.makeChatRequest(messages: [], config: cfg)
+    let body = try XCTUnwrap(request.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+    XCTAssertEqual(body["reasoning_effort"] as? String, "low")
+
+    let error = Data(#"{"error":{"message":"`reasoning_effort` is not supported with this model"}}"#.utf8)
+    let shape = try XCTUnwrap(OpenAICompatibleClient.adjustedShape(.init(), forErrorBody: error))
+    XCTAssertTrue(shape.omitReasoningEffort)
+    let retried = try OpenAICompatibleClient.makeChatRequest(messages: [], config: cfg, shape: shape)
+    let retriedBody = try XCTUnwrap(retried.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+    XCTAssertNil(retriedBody["reasoning_effort"])
+  }
+
+  func testNoReasoningEffortByDefault() throws {
+    let request = try OpenAICompatibleClient.makeChatRequest(messages: [], config: config())
+    let body = try XCTUnwrap(request.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+    XCTAssertNil(body["reasoning_effort"])
+  }
+
+  @MainActor
+  func testAutomaticEffortOnlyForGptOss() {
+    typealias Effort = AssistantSettings.ReasoningEffort
+    XCTAssertEqual(Effort.automatic.value(forModel: "openai/gpt-oss-120b"), "low")
+    XCTAssertNil(Effort.automatic.value(forModel: "qwen/qwen3.8-27b"))
+    XCTAssertNil(Effort.off.value(forModel: "openai/gpt-oss-120b"))
+    XCTAssertEqual(Effort.none.value(forModel: "qwen/qwen3.8-27b"), "none")
+  }
+
+  // MARK: - Think Tags
+
+  func testThinkFilterDropsInlineReasoningAcrossChunks() {
+    var filter = ThinkTagFilter()
+    let chunks = ["<thi", "nk>planning the", " answer</th", "ink>\n\n**Say:** hi", " there <b>"]
+    let output = chunks.map { filter.filter($0) }.joined()
+    XCTAssertEqual(output, "**Say:** hi there <b>")
+  }
+
+  func testThinkFilterPassesPlainTextThrough() {
+    var filter = ThinkTagFilter()
+    XCTAssertEqual(filter.filter("No tags here, x < y"), "No tags here, x < y")
+    // A trailing "<" might start a tag, so it's held until the next chunk.
+    XCTAssertEqual(filter.filter("compare a <"), "compare a ")
+    XCTAssertEqual(filter.filter(" b"), "< b")
+    XCTAssertEqual(filter.filter("ends with <"), "ends with ")
+    XCTAssertEqual(filter.finish(), "<", "held text is released at end of stream")
+  }
 }

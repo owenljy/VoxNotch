@@ -26,6 +26,8 @@ nonisolated struct OpenAICompatibleConfig: Sendable, Equatable {
   var model: String
   var temperature: Double
   var maxTokens: Int
+  /// Sent as `reasoning_effort` when set (e.g. "low" for gpt-oss); nil omits it.
+  var reasoningEffort: String? = nil
 
   func endpoint(_ path: String) throws -> URL {
     var base = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -63,6 +65,7 @@ nonisolated final class OpenAICompatibleClient: Sendable {
   struct RequestShape: Sendable, Hashable {
     var useMaxCompletionTokens = false
     var omitTemperature = false
+    var omitReasoningEffort = false
   }
 
   private let session: URLSession
@@ -90,11 +93,15 @@ nonisolated final class OpenAICompatibleClient: Sendable {
       let task = Task {
         do {
           let bytes = try await openStream(messages: messages, config: config)
+          var thinkFilter = ThinkTagFilter()
           for try await line in bytes.lines {
             switch Self.parseSSELine(line) {
             case .delta(let text):
-              continuation.yield(text)
+              let visible = thinkFilter.filter(text)
+              if !visible.isEmpty { continuation.yield(visible) }
             case .done:
+              let tail = thinkFilter.finish()
+              if !tail.isEmpty { continuation.yield(tail) }
               continuation.finish()
               return
             case .error(let message):
@@ -103,6 +110,8 @@ nonisolated final class OpenAICompatibleClient: Sendable {
               continue
             }
           }
+          let tail = thinkFilter.finish()
+          if !tail.isEmpty { continuation.yield(tail) }
           continuation.finish()
         } catch {
           continuation.finish(throwing: Self.normalize(error))
@@ -197,7 +206,8 @@ nonisolated final class OpenAICompatibleClient: Sendable {
         stream: true,
         temperature: shape.omitTemperature ? nil : config.temperature,
         maxTokens: shape.useMaxCompletionTokens ? nil : config.maxTokens,
-        maxCompletionTokens: shape.useMaxCompletionTokens ? config.maxTokens : nil
+        maxCompletionTokens: shape.useMaxCompletionTokens ? config.maxTokens : nil,
+        reasoningEffort: shape.omitReasoningEffort ? nil : config.reasoningEffort
       )
     )
     return request
@@ -215,6 +225,8 @@ nonisolated final class OpenAICompatibleClient: Sendable {
       adjusted.useMaxCompletionTokens = true
     } else if !shape.omitTemperature, text.contains("temperature") {
       adjusted.omitTemperature = true
+    } else if !shape.omitReasoningEffort, text.contains("reasoning") {
+      adjusted.omitReasoningEffort = true
     }
     return adjusted == shape ? nil : adjusted
   }
@@ -273,11 +285,13 @@ nonisolated final class OpenAICompatibleClient: Sendable {
     let temperature: Double?
     let maxTokens: Int?
     let maxCompletionTokens: Int?
+    let reasoningEffort: String?
 
     enum CodingKeys: String, CodingKey {
       case model, messages, stream, temperature
       case maxTokens = "max_tokens"
       case maxCompletionTokens = "max_completion_tokens"
+      case reasoningEffort = "reasoning_effort"
     }
   }
 
@@ -300,5 +314,56 @@ nonisolated final class OpenAICompatibleClient: Sendable {
   private struct ModelList: Decodable {
     struct Model: Decodable { let id: String }
     let data: [Model]
+  }
+}
+
+// MARK: - Think Tag Filter
+
+/// Drops `<think>…</think>` spans that some servers inline in the content stream
+/// when reasoning is enabled, including tags split across chunks.
+nonisolated struct ThinkTagFilter {
+
+  private static let open = "<think>"
+  private static let close = "</think>"
+
+  private var isThinking = false
+  private var carry = ""
+
+  mutating func filter(_ chunk: String) -> String {
+    var input = carry + chunk
+    carry = ""
+    var output = ""
+
+    while !input.isEmpty {
+      let tag = isThinking ? Self.close : Self.open
+      if let range = input.range(of: tag) {
+        if !isThinking { output += input[..<range.lowerBound] }
+        input = String(input[range.upperBound...])
+        isThinking.toggle()
+        if !isThinking { input = String(input.drop { $0 == "\n" }) }
+        continue
+      }
+      // Hold back a possible partial tag at the end of the chunk.
+      let keep = Self.partialTagSuffixLength(input, tag: tag)
+      let emitEnd = input.index(input.endIndex, offsetBy: -keep)
+      if !isThinking { output += input[..<emitEnd] }
+      carry = String(input[emitEnd...])
+      input = ""
+    }
+    return output
+  }
+
+  /// Releases text held back as a possible partial tag once the stream ends.
+  mutating func finish() -> String {
+    defer { carry = "" }
+    return isThinking ? "" : carry
+  }
+
+  private static func partialTagSuffixLength(_ text: String, tag: String) -> Int {
+    for length in stride(from: min(tag.count - 1, text.count), through: 1, by: -1)
+    where tag.hasPrefix(text.suffix(length)) {
+      return length
+    }
+    return 0
   }
 }
