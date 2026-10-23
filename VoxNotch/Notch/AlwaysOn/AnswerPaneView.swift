@@ -83,6 +83,8 @@ private struct AnswerHeaderView: View {
 
       Spacer(minLength: 6)
 
+      MobileCompanionButton()
+
       if let answer, !answer.markdown.isEmpty {
         CopyButton(text: answer.markdown)
       }

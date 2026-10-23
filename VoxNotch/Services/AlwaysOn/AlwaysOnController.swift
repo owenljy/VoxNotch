@@ -118,6 +118,7 @@ final class AlwaysOnController {
   }
 
   func stop() {
+    MobileCompanionServer.shared.stop()
     guard state.isActive || transcriber != nil else {
       panel.hide()
       return
@@ -310,6 +311,7 @@ final class AlwaysOnController {
   }
 
   private func fail(_ error: Error) {
+    MobileCompanionServer.shared.stop()
     let sessionID = state.sessionID
     logger.error("Always-On failed: \(error.localizedDescription, privacy: .public)")
     AssistantService.shared.stop()

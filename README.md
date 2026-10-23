@@ -60,6 +60,21 @@ ticks. Move away to restore the previous answer, click to lock a page, or
 double-click to unlock and return. The lock button offers the same toggle;
 ⌃⌘← / ⌃⌘→ still navigate between answers.
 
+To view both panes on your phone, connect it to the same Wi-Fi as your Mac.
+Click the phone icon next to Ask (or open Settings → Always-On → Phone View),
+choose **Enable Phone View**, and scan the QR code with your phone camera.
+The browser shows live partial transcripts and streaming answers; portrait uses
+stacked panes and landscape uses side-by-side panes. Browse answers independently
+with the slider, or choose **Follow Mac** to mirror the Mac's selected answer.
+
+Phone View is read-only and off by default. It shares only the current session's
+text over your local network, with no relay service or phone app required. Anyone
+with the session link can view it. Use trusted Wi-Fi: the HTTP connection is not
+encrypted. **New QR Code** revokes the previous link; turning Phone View off,
+stopping Always-On, or sleeping/quitting the Mac ends access. If connection fails,
+check macOS Local Network/firewall permissions and avoid guest networks that
+isolate devices. See [Phone View implementation notes](docs/phone-view.md).
+
 Final transcripts and answers are saved locally by default. Saving and retention
 can be changed in Settings. The Always-On history browser requires macOS 26+.
 AI requests include the selected transcript window and, when enabled, earlier

@@ -19,6 +19,7 @@ struct AlwaysOnTab: View {
   var body: some View {
     Form {
       sessionSection
+      MobileCompanionSettingsSection()
       promptSection
       vocabularySection
       answersSection

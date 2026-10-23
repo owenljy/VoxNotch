@@ -425,6 +425,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "VoxNotch connects to your phone on the same Wi-Fi to display your live transcript and AI answers when you enable Phone View.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "VoxNotch needs microphone access for voice dictation";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
@@ -458,6 +459,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "VoxNotch connects to your phone on the same Wi-Fi to display your live transcript and AI answers when you enable Phone View.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "VoxNotch needs microphone access for voice dictation";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
