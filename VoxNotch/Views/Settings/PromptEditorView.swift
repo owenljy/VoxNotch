@@ -112,7 +112,7 @@ struct PromptEditorView: View {
       Divider()
         .frame(height: 16)
 
-      Menu {
+      PrivacyMenu {
         ForEach(PromptTemplate.helperSnippets, id: \.label) { snippet in
           Button(snippet.label) {
             insertSnippet(snippet.snippet)

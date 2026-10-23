@@ -22,7 +22,7 @@ final class OnboardingWindowController: NSWindowController {
   // MARK: - Initialization
 
   private init() {
-    let window = NSWindow(
+    let window = PrivacyWindow(
       contentRect: NSRect(x: 0, y: 0, width: 540, height: 500),
       styleMask: [.titled, .closable],
       backing: .buffered,
@@ -36,7 +36,6 @@ final class OnboardingWindowController: NSWindowController {
     super.init(window: window)
 
     installFreshView()
-    window.sharingType = SettingsManager.shared.hideFromScreenRecording ? .none : .readOnly
   }
 
   @available(*, unavailable)
@@ -61,6 +60,6 @@ final class OnboardingWindowController: NSWindowController {
       self?.onComplete?()
       self?.close()
     }
-    window?.contentView = NSHostingView(rootView: onboardingView)
+    window?.contentView = NSHostingView(rootView: onboardingView.privacyProtectedWindow())
   }
 }

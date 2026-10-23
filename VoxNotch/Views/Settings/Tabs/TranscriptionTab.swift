@@ -76,7 +76,7 @@ struct TranscriptionTab: View {
                   .foregroundStyle(.secondary)
               }
               .buttonStyle(.plain)
-              .help("Reset to default system sound")
+              .privacyAwareHelp("Reset to default system sound")
             }
           }
 

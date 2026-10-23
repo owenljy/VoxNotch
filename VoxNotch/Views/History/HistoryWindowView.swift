@@ -94,7 +94,7 @@ struct HistoryWindowView: View {
           ForEach(group.records) { transcription in
             TranscriptionRowView(transcription: transcription)
               .tag(transcription)
-              .contextMenu {
+              .privacyAwareContextMenu {
                 Button("Copy Text") {
                   copyText(for: transcription)
                 }
@@ -440,7 +440,7 @@ struct TranscriptionDetailView: View {
         } label: {
           Label("Copy", systemImage: "doc.on.doc")
         }
-        .help("Copy transcription text")
+        .privacyAwareHelp("Copy transcription text")
       }
     }
   }

@@ -104,7 +104,7 @@ private struct AnswerHeaderView: View {
           AlwaysOnController.shared.askNow()
         }
         .disabled(!state.isActive)
-        .help(settings.askShortcut.map { "Ask AI (\($0.displayString))" } ?? "Ask AI")
+        .privacyAwareHelp(settings.askShortcut.map { "Ask AI (\($0.displayString))" } ?? "Ask AI")
       }
     }
   }
@@ -151,7 +151,7 @@ private struct TemplateMenu: View {
   @Bindable private var settings = AssistantSettings.shared
 
   var body: some View {
-    Menu {
+    PrivacyMenu {
       ForEach(AssistantPromptTemplate.all) { template in
         Button {
           settings.promptTemplateID = template.id
@@ -184,7 +184,7 @@ private struct TemplateMenu: View {
     .menuStyle(.borderlessButton)
     .menuIndicator(.hidden)
     .fixedSize()
-    .help("Prompt template")
+    .privacyAwareHelp("Prompt template")
   }
 }
 

@@ -21,7 +21,7 @@ struct DeviceChip: View {
   private var canChange: Bool { state.status == .running }
 
   var body: some View {
-    Menu {
+    PrivacyMenu {
       switch source {
       case .microphone: microphoneMenu
       case .systemAudio: outputMenu
@@ -48,7 +48,7 @@ struct DeviceChip: View {
     .menuStyle(.borderlessButton)
     .menuIndicator(.hidden)
     .fixedSize(horizontal: false, vertical: true)
-    .help(helpText)
+    .privacyAwareHelp(helpText)
   }
 
   // MARK: - Menus

@@ -32,7 +32,6 @@ final class NotchPanel: NSPanel {
 
     collectionBehavior = [
       .fullScreenAuxiliary,
-      .stationary,
       .canJoinAllSpaces,
       .ignoresCycle,
     ]
@@ -40,6 +39,18 @@ final class NotchPanel: NSPanel {
     isReleasedWhenClosed = false
     level = .mainMenu + 3
     hasShadow = false
+    hidesOnDeactivate = false
+    WindowPrivacyManager.shared.prepare(self)
+  }
+
+  override func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
+    if place != .out { WindowPrivacyManager.shared.prepare(self) }
+    super.order(place, relativeTo: otherWin)
+  }
+
+  override func orderFrontRegardless() {
+    WindowPrivacyManager.shared.prepare(self)
+    super.orderFrontRegardless()
   }
 
   override var canBecomeKey: Bool { false }

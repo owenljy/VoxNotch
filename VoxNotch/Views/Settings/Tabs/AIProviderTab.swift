@@ -67,7 +67,7 @@ struct AIProviderTab: View {
           Image(systemName: isKeyVisible ? "eye.slash" : "eye")
         }
         .buttonStyle(.borderless)
-        .help(isKeyVisible ? "Hide API key" : "Show API key")
+        .privacyAwareHelp(isKeyVisible ? "Hide API key" : "Show API key")
       }
     } header: {
       Text("OpenAI-Compatible Endpoint")
@@ -82,7 +82,7 @@ struct AIProviderTab: View {
         TextField("Model", text: $settings.model, prompt: Text(AssistantSettings.Defaults.model))
           .autocorrectionDisabled()
 
-        Menu {
+        PrivacyMenu {
           ForEach(availableModels, id: \.self) { model in
             Button(model) { settings.model = model }
           }
@@ -93,7 +93,7 @@ struct AIProviderTab: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(availableModels.isEmpty)
-        .help(availableModels.isEmpty ? "Fetch models first" : "Choose from \(availableModels.count) models")
+        .privacyAwareHelp(availableModels.isEmpty ? "Fetch models first" : "Choose from \(availableModels.count) models")
 
         Button {
           Task { await fetchModels(silently: false) }

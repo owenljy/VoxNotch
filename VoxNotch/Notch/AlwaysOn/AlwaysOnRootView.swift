@@ -313,6 +313,6 @@ private struct PanelResizeHandle: View {
     }
     .frame(width: 14, height: 14)
     .overlay(PanelMouseArea(role: .resize))
-    .help("Resize")
+    .privacyAwareHelp("Resize")
   }
 }

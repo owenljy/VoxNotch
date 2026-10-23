@@ -244,10 +244,6 @@ final class AlwaysOnPanelController {
 
   // MARK: - Panel
 
-  private static var sharingType: NSWindow.SharingType {
-    SettingsManager.shared.hideFromScreenRecording ? .none : .readOnly
-  }
-
   private func makePanel() -> NotchPanel {
     let panel = NotchPanel(
       contentRect: NSRect(origin: .zero, size: Self.minimumSize),
@@ -273,15 +269,7 @@ final class AlwaysOnPanelController {
     hostingView.translatesAutoresizingMaskIntoConstraints = true
     container.addSubview(hostingView)
     panel.contentView = container
-    panel.sharingType = Self.sharingType
 
-    NotificationCenter.default.addObserver(
-      forName: .hideFromScreenRecordingChanged, object: nil, queue: .main
-    ) { [weak self] _ in
-      MainActor.assumeIsolated {
-        self?.panel?.sharingType = Self.sharingType
-      }
-    }
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
     ) { [weak self] _ in

@@ -18,7 +18,7 @@ final class SettingsWindowController: NSWindowController {
   // MARK: - Initialization
 
   private init() {
-    let window = NSWindow(
+    let window = PrivacyWindow(
       contentRect: NSRect(x: 0, y: 0, width: 860, height: 580),
       styleMask: [.titled, .closable],
       backing: .buffered,
@@ -28,26 +28,12 @@ final class SettingsWindowController: NSWindowController {
     window.title = "VoxNotch Settings"
     window.center()
     window.isReleasedWhenClosed = false
-    window.contentView = NSHostingView(rootView: SettingsView())
+    window.contentView = NSHostingView(rootView: SettingsView().privacyProtectedWindow())
 
     /// Restore window position
     window.setFrameAutosaveName("VoxNotchSettingsWindow")
-    window.sharingType = SettingsManager.shared.hideFromScreenRecording ? .none : .readOnly
 
     super.init(window: window)
-
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleSharingTypeChanged),
-      name: .hideFromScreenRecordingChanged,
-      object: nil
-    )
-  }
-
-  // MARK: - Notifications
-
-  @objc private func handleSharingTypeChanged() {
-    window?.sharingType = SettingsManager.shared.hideFromScreenRecording ? .none : .readOnly
   }
 
   @available(*, unavailable)

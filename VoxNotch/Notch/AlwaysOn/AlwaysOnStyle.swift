@@ -108,7 +108,8 @@ struct PanelIconButton: View {
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .help(help)
+    .privacyAwareHelp(help)
+    .accessibilityLabel(Text(help))
     .onHover { isHovering = $0 }
   }
 }

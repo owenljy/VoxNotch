@@ -66,7 +66,7 @@ struct AlwaysOnHistoryWindowView: View {
             ForEach(group.records) { session in
               AlwaysOnSessionRow(session: session)
                 .tag(session)
-                .contextMenu {
+                .privacyAwareContextMenu {
                   Button("Copy Session") { Task { await copy(session) } }
                   Divider()
                   Button("Delete", role: .destructive) {

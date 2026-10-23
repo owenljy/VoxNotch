@@ -19,7 +19,7 @@ final class HistoryWindowController: NSWindowController {
   // MARK: - Initialization
 
   private init() {
-    let window = NSWindow(
+    let window = PrivacyWindow(
       contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
       styleMask: [.titled, .closable, .miniaturizable, .resizable],
       backing: .buffered,
@@ -30,26 +30,12 @@ final class HistoryWindowController: NSWindowController {
     window.center()
     window.minSize = NSSize(width: 650, height: 420)
     window.isReleasedWhenClosed = false
-    window.contentView = NSHostingView(rootView: HistoryWindowView())
+    window.contentView = NSHostingView(rootView: HistoryWindowView().privacyProtectedWindow())
 
     /// Restore window position
     window.setFrameAutosaveName("VoxNotchHistoryWindow")
-    window.sharingType = SettingsManager.shared.hideFromScreenRecording ? .none : .readOnly
 
     super.init(window: window)
-
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleSharingTypeChanged),
-      name: .hideFromScreenRecordingChanged,
-      object: nil
-    )
-  }
-
-  // MARK: - Notifications
-
-  @objc private func handleSharingTypeChanged() {
-    window?.sharingType = SettingsManager.shared.hideFromScreenRecording ? .none : .readOnly
   }
 
   @available(*, unavailable)

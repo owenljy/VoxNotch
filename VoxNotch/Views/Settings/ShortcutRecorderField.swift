@@ -42,7 +42,7 @@ struct ShortcutRecorderField: View {
             Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
           }
           .buttonStyle(.borderless)
-          .help("Disable shortcut")
+          .privacyAwareHelp("Disable shortcut")
         }
       }
     }

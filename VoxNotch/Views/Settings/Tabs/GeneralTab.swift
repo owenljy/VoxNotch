@@ -83,13 +83,13 @@ struct GeneralTab: View {
       // MARK: Privacy
       Section {
         Toggle(isOn: $settings.hideFromScreenRecording) {
-          InfoLabel(title: "Hide from screen recording", tooltip: "When enabled, VoxNotch windows won't appear in screen recordings, screenshots by other apps, or screen sharing.")
+          InfoLabel(title: "Hide from screen recording", tooltip: "Requests that compatible capture apps omit VoxNotch windows. Support depends on macOS, the capture app and its sharing mode. Check the receiving screen before sharing sensitive content.")
         }
       } header: {
         Text("Privacy")
           .settingsSectionHeading()
       } footer: {
-        Text("Prevents VoxNotch from appearing in screen shares and recordings.")
+        Text("Attempts to hide VoxNotch in compatible screen shares and recordings. Verify the receiving screen before use.")
           .settingsSectionNote()
       }
 

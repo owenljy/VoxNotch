@@ -37,20 +37,21 @@ struct InfoLabel: View {
   var body: some View {
     HStack(spacing: InterfaceScale.Space.small) {
       Text(title)
-      Image(systemName: "info.circle")
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .onTapGesture {
-          showPopover.toggle()
-        }
-        .popover(isPresented: $showPopover, arrowEdge: .trailing) {
-          Text(tooltip)
-            .font(InterfaceScale.Typography.body)
-            .foregroundStyle(.secondary)
-            .padding(InterfaceScale.Space.medium)
-            .frame(maxWidth: 260, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-        }
+      Button { showPopover.toggle() } label: {
+        Image(systemName: "info.circle")
+          .font(.system(size: 11))
+          .foregroundStyle(.secondary)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("About \(title)")
+      .privacyAwarePopover(isPresented: $showPopover, arrowEdge: .trailing) {
+        Text(tooltip)
+          .font(InterfaceScale.Typography.body)
+          .foregroundStyle(.secondary)
+          .padding(InterfaceScale.Space.medium)
+          .frame(maxWidth: 260, alignment: .leading)
+          .fixedSize(horizontal: false, vertical: true)
+      }
     }
   }
 }
@@ -62,20 +63,21 @@ struct InfoIcon: View {
   @State private var showPopover = false
 
   var body: some View {
-    Image(systemName: "info.circle")
-      .font(.system(size: 11))
-      .foregroundStyle(.secondary)
-      .onTapGesture {
-        showPopover.toggle()
-      }
-      .popover(isPresented: $showPopover, arrowEdge: .trailing) {
-        Text(tooltip)
-          .font(InterfaceScale.Typography.body)
-          .foregroundStyle(.secondary)
-          .padding(InterfaceScale.Space.medium)
-          .frame(maxWidth: 260, alignment: .leading)
-          .fixedSize(horizontal: false, vertical: true)
-      }
+    Button { showPopover.toggle() } label: {
+      Image(systemName: "info.circle")
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("More information")
+    .privacyAwarePopover(isPresented: $showPopover, arrowEdge: .trailing) {
+      Text(tooltip)
+        .font(InterfaceScale.Typography.body)
+        .foregroundStyle(.secondary)
+        .padding(InterfaceScale.Space.medium)
+        .frame(maxWidth: 260, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
   }
 }
 
@@ -572,7 +574,7 @@ struct QuickSwitchOrderedList: View {
         }
         .buttonStyle(.plain)
         .padding(.leading, InterfaceScale.Space.micro)
-        .popover(isPresented: $showAddPopover, arrowEdge: .bottom) {
+        .privacyAwarePopover(isPresented: $showAddPopover, arrowEdge: .bottom) {
           addPicker
         }
       }
@@ -640,7 +642,7 @@ struct ToneRowView: View {
           .foregroundStyle(isActive ? Color.accentColor : .secondary)
       }
       .buttonStyle(.plain)
-      .help(isActive ? "Active tone" : "Set as active tone")
+      .privacyAwareHelp(isActive ? "Active tone" : "Set as active tone")
 
       // Name
       Text(tone.displayName)
@@ -865,7 +867,7 @@ struct ModelDownloadRow: View {
             .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.red)
         }
-        .help(message)
+        .privacyAwareHelp(message)
 
         Button("Retry") {
           onRetry()
@@ -969,7 +971,7 @@ struct OllamaModelRow: View {
             .font(InterfaceScale.Typography.caption)
             .foregroundStyle(.red)
         }
-        .help(message)
+        .privacyAwareHelp(message)
 
         Button("Retry") {
           onPull()

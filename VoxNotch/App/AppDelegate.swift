@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - App Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = WindowPrivacyManager.shared
         setupMenuBar()
         setupNotch()
         initializeDatabase()
@@ -351,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Ensure app activates properly
         NSApp.setActivationPolicy(.accessory)
+        WindowPrivacyManager.shared.reapplyAll()
 
         // Check for updates on launch if enabled
         if container.settings.checkForUpdatesAutomatically {
