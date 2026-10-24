@@ -138,12 +138,27 @@ jobs:
         name: Remove signing trust and keychain
         if: always()
         run: |
-          if [ -f "$RUNNER_TEMP/signing-cert.pem" ]; then
-            sudo security remove-trusted-cert -d "$RUNNER_TEMP/signing-cert.pem" || true
-            sudo security delete-certificate -Z "$SIGNING_CERT_SHA1" /Library/Keychains/System.keychain || true
-          fi
-          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then security delete-keychain "$SIGNING_KEYCHAIN" || true; fi
-          rm -f "$RUNNER_TEMP/signing-cert.pem" "$RUNNER_TEMP/signing.p12"
+          python3 - <<'PYCODE'
+          import os, pathlib, subprocess
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          keychain = os.environ.get('SIGNING_KEYCHAIN')
+          certificate = temp / 'signing-cert.pem'
+          commands = []
+          if keychain:
+              commands.append(('delete private keychain', ['security', 'delete-keychain', keychain]))
+          if certificate.exists():
+              commands.extend([
+                  ('remove temporary code-signing trust', ['sudo', '-n', 'security', 'remove-trusted-cert', '-d', str(certificate)]),
+                  ('remove public certificate', ['sudo', '-n', 'security', 'delete-certificate', '-Z', os.environ['SIGNING_CERT_SHA1'], '/Library/Keychains/System.keychain']),
+              ])
+          for label, command in commands:
+              try:
+                  subprocess.run(command, check=True, timeout=20)
+              except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                  print(f'::warning::Cleanup could not {label}: {type(error).__name__}; hosted runner is discarded after the job', flush=True)
+          for name in ['signing-cert.pem', 'signing.p12']:
+              (temp / name).unlink(missing_ok=True)
+          PYCODE
 
   test:
     needs: signing-preflight

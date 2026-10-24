@@ -106,7 +106,10 @@ user search list, and the self-signed certificate had no code-signing trust on t
 hosted runner. The workflow now adds the keychain to that list, grants the pinned
 public certificate code-signing trust on the ephemeral runner, checks a valid
 identity, and signs and verifies a small real executable before building. Cleanup
-removes the trust, public certificate, and temporary keychain. This does not
+deletes the private keychain first, then removes temporary trust and the public
+certificate. Each system cleanup command has a 20-second timeout because trust
+removal can hang on a hosted runner; any failure is reported as a warning before
+the ephemeral runner is discarded. This does not
 change trust settings on a developer or user's Mac.
 
 To validate signing without a full build:
