@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.5.3
+## 0.5.4
+
+- Work around the Swift 6.3.3 Release compiler crash in the preloaded model cache deallocator, keeping model loading optimized and checking the workaround before the full archive. The v0.5.3 attempt passed tests but did not publish an installer.
 
 - Verify privacy restoration requests without relying on AppKit's stale `sharingType` readback, and isolate AI service tests from the machine's Keychain state. The v0.5.2 attempt failed the test gate and did not publish an installer.
 
@@ -14,7 +16,7 @@
 - Improve the Coding Interview template with Python-only, plain-spoken answers, and add configurable reasoning effort.
 - Sign releases with a stable certificate to preserve the app identity across future updates. **This is the first release using that certificate: upgrading from an earlier ad-hoc-signed version may require granting macOS permissions again once.**
 
-Build number: 10.
+Build number: 11.
 
 ## 0.5.1
 

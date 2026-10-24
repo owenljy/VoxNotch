@@ -17,10 +17,10 @@ Apple Silicon Mac before releasing ASR changes; see `asr-evaluation.md`.
 
 Update both Debug and Release `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`
 in `VoxNotch.xcodeproj/project.pbxproj`, then update `CHANGELOG.md`.
-Current version: **0.5.3 (10)**.
+Current version: **0.5.4 (11)**.
 
 After committing and pushing the reviewed changes, push the corresponding
-`v0.5.3` tag to publish. The workflow checks the tag against the project version
+`v0.5.4` tag to publish. The workflow checks the tag against the project version
 and then against the archived app's `CFBundleShortVersionString`.
 Only stable `vMAJOR.MINOR.PATCH` tags are accepted.
 
@@ -78,11 +78,22 @@ continues to assert that disabling protection restores actual visible content.
 AI streaming tests also inject their Keychain reader so a locally saved key's
 approval state cannot interfere with mocked providers. A regression test verifies
 that approval failures still prevent requests and never use interactive reads.
-No v0.5.2 installer was published; v0.5.3 includes the fixes and keeps the failed
-tag intact.
+No v0.5.2 installer was published; the fixes are included in v0.5.4, and the failed
+tag remains intact.
 
 Local validation for the retry: 297 tests, zero failures, five conditional skips.
 The additional capture check skipped because the newly built test host did not
 have Screen Recording permission. The earlier authorized build passed two rounds
 of the AppKit/SwiftUI capture matrix (32 tests, zero skips); production capture
 code is unchanged by this CI fix.
+
+The [v0.5.3 attempt](https://github.com/owenljy/VoxNotch/actions/runs/40094714041)
+passed all 297 tests but Swift 6.3.3 crashed in `EarlyPerfInliner` while optimizing
+`PreparedModelCache`'s generic deallocator (`PreparedModelCacheCfD`). The complete
+`archive-log` artifact contains the backtrace; the Actions console is truncated.
+An explicit `@_optimize(none) deinit {}` marks both destroying and deallocating
+destructors `[Onone]` in optimized SIL. Other cache methods remain optimized.
+The shared CI workflow compiles this file with `-O` and checks that exact
+deallocator before spending time building dependencies or the release archive. Keep this narrow compiler
+workaround until the pinned toolchain is verified to no longer need it. No
+v0.5.3 installer was published; v0.5.4 retries with the workaround.

@@ -25,6 +25,11 @@ final class PreparedModelCache<Models: Sendable> {
     self.load = load
   }
 
+  // Swift 6.3.3 crashes in EarlyPerfInliner while optimizing the synthesized
+  // generic deallocator during Release archives. Keep only destruction unoptimized.
+  @_optimize(none)
+  deinit {}
+
   func preload() {
     guard cached == nil, pending == nil else { return }
     let request = startLoad()

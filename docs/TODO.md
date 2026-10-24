@@ -12,7 +12,7 @@
 3. **体验好**
 
 ### 当前状态
-- 本次准备发布 **v0.5.3（build 10）**，包含 v0.5.1 之后的全部改动。发布结果以 GitHub Release 和 Actions 为准。v0.5.2 首次尝试因 AppKit 的 sharingType 读回值与恢复请求不一致而使 4 个断言失败，未发布安装包；v0.5.3 改为记录真实 setter 请求，并隔离 AI 服务测试与本机钥匙串状态，保留失败 tag。
+- 本次准备发布 **v0.5.4（build 11）**，包含 v0.5.1 之后的全部改动。发布结果以 GitHub Release 和 Actions 为准。v0.5.2 首次尝试因 AppKit 的 sharingType 读回值与恢复请求不一致而使 4 个断言失败，未发布安装包；v0.5.3 修复该测试并通过云端 297 项测试，但归档时 Swift 6.3.3 优化 PreparedModelCache 析构函数崩溃；v0.5.4 仅对析构函数禁用优化并添加编译预检查。两次均未发布安装包，失败 tag 保留。
 - 已包含会话权限预检查（`69f7b3c`）、固定证书签名（`54f20a4`）、首字超时/备用模型及预加载（`bf1d9e0`）、CGS 刷新修复（`ce55255`）和 SwiftUI 像素验证（`335695c`）。
 - macOS 27.0.1 全量测试（含 CI 修复）：**297 项，0 失败，5 项条件测试跳过**。显示器恢复后的窗口/像素复测：**两轮共 32 项，0 失败、0 跳过**。此前 Release 构建通过。CI 修复后的补充像素复测因新测试宿主缺少录屏权限跳过；捕获实现未改动，以上两轮像素结果来自此前已授权构建。
 
@@ -71,10 +71,10 @@ TEST_RUNNER_VOXNOTCH_LIVE_ASR_TESTS=1 xcodebuild test ... -only-testing:VoxNotch
   - 同时修复共享中启用 CGS 后的旧画面、放大边缘泄漏和关闭后残留灰块。详见 `capture-exclusion-validation-2026-10-24.md`。
   - 完成于 commit `ce55255`、`335695c`；本地 macOS 27 全量测试已通过。
 
-- [ ] **P0-2 发布 v0.5.3，并确认新的签名流程在 CI 上跑通**
-  1. 升级版本号：`VoxNotch.xcodeproj/project.pbxproj` 里 Debug 和 Release 两个配置的 `MARKETING_VERSION` 都改成 `0.5.3`，`CURRENT_PROJECT_VERSION` 都改成 `10`。同时更新 `CHANGELOG.md`，以及 `docs/releasing.md` 里的 "Current version"。
+- [ ] **P0-2 发布 v0.5.4，并确认新的签名流程在 CI 上跑通**
+  1. 升级版本号：`VoxNotch.xcodeproj/project.pbxproj` 里 Debug 和 Release 两个配置的 `MARKETING_VERSION` 都改成 `0.5.4`，`CURRENT_PROJECT_VERSION` 都改成 `11`。同时更新 `CHANGELOG.md`，以及 `docs/releasing.md` 里的 "Current version"。
   2. CHANGELOG 里要写明：**这是第一个用固定证书签名的版本，从 ad-hoc 版本升级时，macOS 会最后一次重新请求权限。** 同时概括 v0.5.1 之后的新内容：Phone View、iPad 分栏、麦克风校验、回答历史预览、防录屏加固、Coding Interview 模板改进、Reasoning effort、会话中不弹权限。
-  3. `git push origin main`，然后推送 tag `v0.5.3`，盯着 `Build & Release` workflow。
+  3. `git push origin main`，然后推送 tag `v0.5.4`，盯着 `Build & Release` workflow。
   4. **重点检查：** 「Import signing certificate」这一步成功，并且日志里的 `designated => identifier "com.jingyuanliang.VoxNotch" and certificate root = H"a722522038615d41e96104cbe6110d94ead809b4"` 存在。
   5. 下载 DMG，在本机运行 `codesign -d -r- /Volumes/VoxNotch/VoxNotch.app` 复核。
   - **验收：** Release 页面上有 DMG 和 sha256，DR 锁定在这张证书上。

@@ -24,6 +24,15 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
+      - name: Check model cache compiler workaround
+        run: |
+          set -euo pipefail
+          xcrun swiftc -O -swift-version 5 -default-isolation MainActor \
+            -emit-sil -module-name VoxNotch \
+            VoxNotch/Services/AlwaysOn/PreparedModelCache.swift \
+            -o "$RUNNER_TEMP/PreparedModelCache.sil"
+          grep -E '^sil.*\[Onone\].*PreparedModelCacheCfD' "$RUNNER_TEMP/PreparedModelCache.sil"
+
       - name: Build and test locked dependencies
         run: |
           set -o pipefail
