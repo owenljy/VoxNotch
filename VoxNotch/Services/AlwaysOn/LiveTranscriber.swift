@@ -79,9 +79,19 @@ actor LiveTranscriber {
 
   // MARK: - Lifecycle
 
+  nonisolated struct PreparedModels: Sendable {
+    let asr: AsrManager
+    let vad: VadManager
+    let decoderLayers: Int
+  }
+
   /// Takes a loaded Parakeet TDT manager and warms it and the VAD up so the first
   /// utterance doesn't pay compile/load cost.
   func prepare(asr: AsrManager) async throws {
+    try prepare(models: await Self.prepareModels(asr: asr))
+  }
+
+  nonisolated static func prepareModels(asr: AsrManager) async throws -> PreparedModels {
     let clock = ContinuousClock()
     let start = clock.now
 
@@ -95,11 +105,17 @@ actor LiveTranscriber {
     _ = try? await vad.processStreamingChunk(Array(silence.prefix(VadManager.chunkSize)), state: VadStreamState.initial())
 
     try Task.checkCancellation()
+    Logger(subsystem: "com.voxnotch", category: "LiveTranscriber")
+      .info("Transcription models prepared in \(Self.ms(clock.now - start)) ms")
+    return PreparedModels(asr: asr, vad: vad, decoderLayers: layers)
+  }
+
+  func prepare(models: PreparedModels) throws {
+    try Task.checkCancellation()
     guard !isShutdown else { throw CancellationError() }
-    self.asr = asr
-    self.decoderLayers = layers
-    self.vad = vad
-    logger.info("Live transcriber ready in \(Self.ms(clock.now - start)) ms")
+    asr = models.asr
+    decoderLayers = models.decoderLayers
+    vad = models.vad
   }
 
   func startSource(_ source: AudioSource) {
@@ -278,7 +294,7 @@ actor LiveTranscriber {
     return (sumOfSquares / Float(samples.count)).squareRoot()
   }
 
-  private static func ms(_ duration: Duration) -> Int {
+  private nonisolated static func ms(_ duration: Duration) -> Int {
     let (seconds, attoseconds) = duration.components
     return Int(seconds) * 1000 + Int(attoseconds / 1_000_000_000_000_000)
   }

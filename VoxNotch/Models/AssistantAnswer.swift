@@ -25,7 +25,8 @@ nonisolated struct AssistantAnswer: Identifiable, Equatable, Sendable {
   let id: UUID
   let createdAt: Date
   let trigger: Trigger
-  let model: String
+  var model: String
+  var retryCount = 0
   var templateName = ""
   var markdown: String = ""
   var status: Status = .waiting

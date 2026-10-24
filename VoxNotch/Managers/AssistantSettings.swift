@@ -23,6 +23,9 @@ final class AssistantSettings {
     static let temperature = "assistant.temperature"
     static let maxTokens = "assistant.maxTokens"
     static let reasoningEffort = "assistant.reasoningEffort"
+    static let firstTokenTimeout = "assistant.firstTokenTimeout"
+    static let fallbackModel = "assistant.fallbackModel"
+    static let preloadTranscriptionOnLaunch = "assistant.preloadTranscriptionOnLaunch"
     static let textColorHex = "assistant.textColorHex"
     static let answerTextColorHex = "assistant.answerTextColorHex"
     static let answerFontSize = "assistant.answerFontSize"
@@ -65,6 +68,7 @@ final class AssistantSettings {
     static let model = "gpt-4o-mini"
     static let temperature = 0.3
     static let maxTokens = 2000
+    static let firstTokenTimeout = 1.5
     static let textColorHex = "#F5F5F7"
     static let meColorHex = "#4DD68F"
     static let themColorHex = "#66B8FF"
@@ -95,6 +99,32 @@ final class AssistantSettings {
 
   var maxTokens: Int {
     didSet { UserDefaults.standard.set(maxTokens, forKey: Keys.maxTokens) }
+  }
+
+  var firstTokenTimeout: Double {
+    didSet { UserDefaults.standard.set(firstTokenTimeout, forKey: Keys.firstTokenTimeout) }
+  }
+
+  /// Empty retries the primary model. The fallback uses the same endpoint/key.
+  var fallbackModel: String {
+    didSet { UserDefaults.standard.set(fallbackModel, forKey: Keys.fallbackModel) }
+  }
+
+  var preloadTranscriptionOnLaunch: Bool {
+    didSet { UserDefaults.standard.set(preloadTranscriptionOnLaunch, forKey: Keys.preloadTranscriptionOnLaunch) }
+  }
+
+  static func normalizedFirstTokenTimeout(_ seconds: Double) -> Double {
+    seconds.isFinite ? min(30, max(0.5, seconds)) : Defaults.firstTokenTimeout
+  }
+
+  func retryConfig(primary: OpenAICompatibleConfig) -> OpenAICompatibleConfig {
+    let fallback = fallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !fallback.isEmpty else { return primary }
+    var config = primary
+    config.model = fallback
+    config.reasoningEffort = reasoningEffort.value(forModel: fallback)
+    return config
   }
 
   enum ReasoningEffort: String, CaseIterable, Sendable {
@@ -440,6 +470,10 @@ final class AssistantSettings {
     model = defaults.string(forKey: Keys.model) ?? Defaults.model
     temperature = defaults.object(forKey: Keys.temperature) as? Double ?? Defaults.temperature
     maxTokens = defaults.object(forKey: Keys.maxTokens) as? Int ?? Defaults.maxTokens
+    firstTokenTimeout = Self.normalizedFirstTokenTimeout(
+      defaults.object(forKey: Keys.firstTokenTimeout) as? Double ?? Defaults.firstTokenTimeout)
+    fallbackModel = defaults.string(forKey: Keys.fallbackModel) ?? ""
+    preloadTranscriptionOnLaunch = defaults.object(forKey: Keys.preloadTranscriptionOnLaunch) as? Bool ?? true
     reasoningEffort = defaults.string(forKey: Keys.reasoningEffort).flatMap(ReasoningEffort.init) ?? .automatic
 
     promptTemplateID = defaults.string(forKey: Keys.promptTemplateID) ?? AssistantPromptTemplate.general.id

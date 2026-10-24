@@ -17,6 +17,7 @@ nonisolated struct MobileCompanionSnapshot: Codable, Equatable, Sendable {
     let model: String
     let status: String
     let error: String?
+    let retryCount: Int
   }
 
   let sessionID: String
@@ -54,7 +55,7 @@ nonisolated struct MobileCompanionSnapshot: Codable, Equatable, Sendable {
       case .failed(let message): status = "failed"; error = message
       }
       return Answer(id: answer.id.uuidString, markdown: answer.markdown, template: answer.templateName,
-                    model: answer.model, status: status, error: error)
+                    model: answer.model, status: status, error: error, retryCount: answer.retryCount)
     }
     displayedAnswerID = state.displayedAnswer?.id.uuidString
   }

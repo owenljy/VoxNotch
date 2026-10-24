@@ -100,7 +100,9 @@ final class AlwaysOnController {
 
     sessionTask = Task {
       do {
-        try await transcriber.prepare(asr: loadASRManager())
+        let models = try await AlwaysOnModelPreloader.models()
+        try checkSession(sessionID)
+        try await transcriber.prepare(models: models)
         try Task.checkCancellation()
         try await startCapture(sources: sources, into: transcriber, sessionID: sessionID)
         try checkSession(sessionID)
@@ -214,18 +216,6 @@ final class AlwaysOnController {
   }
 
   // MARK: - Private
-
-  /// Reuses dictation's Parakeet v2 manager when it's loaded (decoder state is per call,
-  /// so sharing is safe); otherwise loads v2 separately without replacing dictation's model.
-  private func loadASRManager() async throws -> AsrManager {
-    if case .tdt(let manager)? = FluidAudioModelManager.shared.getLoadedModel(for: .v2English) {
-      return manager
-    }
-    let models = try await AsrModels.downloadAndLoad(version: .v2)
-    let manager = AsrManager()
-    try await manager.loadModels(models)
-    return manager
-  }
 
   private func checkSession(_ sessionID: String) throws {
     try Task.checkCancellation()

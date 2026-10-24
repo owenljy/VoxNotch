@@ -57,11 +57,40 @@ struct AlwaysOnTab: View {
       LabeledContent("Next answer") {
         ShortcutRecorderField(shortcut: $settings.nextAnswerShortcut, defaultShortcut: .defaultNextAnswer)
       }
+      Toggle("Preload transcription at launch", isOn: $settings.preloadTranscriptionOnLaunch)
+        .onChange(of: settings.preloadTranscriptionOnLaunch) {
+          if settings.preloadTranscriptionOnLaunch { AlwaysOnModelPreloader.prepareNow() }
+          else if !state.isActive { AlwaysOnModelPreloader.cache.release() }
+        }
+      transcriptionPreparation
     } header: {
       Text("Session")
     } footer: {
       Text("Shortcuts work from any app and are only captured while Always-On is running.")
     }
+  }
+
+  private var transcriptionPreparation: some View {
+    HStack {
+      switch AlwaysOnModelPreloader.cache.status {
+      case .idle:
+        Text("Transcription not preloaded")
+      case .preparing:
+        ProgressView().controlSize(.small)
+        Text("Preparing transcription…")
+      case .ready:
+        Label("Transcription ready", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+      case .failed(let message):
+        Text("Preparation failed: \(message)").foregroundStyle(.orange)
+      }
+      Spacer()
+      if AlwaysOnModelPreloader.cache.status != .preparing && AlwaysOnModelPreloader.cache.status != .ready {
+        Button("Prepare Now") { AlwaysOnModelPreloader.prepareNow() }
+      }
+    }
+    .font(.caption)
+    .privacyAwareHelp("Prepares the English speech model and speech detection without recording. Startup uses downloaded ASR models; Prepare Now also downloads the model if needed.")
   }
 
   // MARK: - Sources
