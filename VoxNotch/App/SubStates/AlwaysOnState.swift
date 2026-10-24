@@ -30,6 +30,10 @@ final class AlwaysOnState {
   var isPaused = false
   var preparingMessage = "Starting live transcription…"
 
+  /// Sources skipped because their permission isn't granted. VoxNotch never asks
+  /// mid-session (the macOS dialog would show on a shared screen).
+  var permissionIssues: Set<AudioSource> = []
+
   /// Recent RMS input level per source, for meters.
   var levels: [AudioSource: Float] = [:]
 
@@ -123,6 +127,7 @@ final class AlwaysOnState {
   }
 
   func begin(sources: Set<AudioSource>) {
+    permissionIssues = []
     sessionID = UUID().uuidString
     segments = []
     lastFinalSegment = nil

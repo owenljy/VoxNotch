@@ -97,8 +97,6 @@ final class AssistantSettings {
     didSet { UserDefaults.standard.set(maxTokens, forKey: Keys.maxTokens) }
   }
 
-  /// Read from the Keychain on first use, never at launch: with ad-hoc signed builds a
-  /// changed signature makes macOS show a blocking Keychain prompt on access.
   enum ReasoningEffort: String, CaseIterable, Sendable {
     /// "low" for models known to reason (gpt-oss); omitted for everything else.
     case automatic
@@ -133,13 +131,30 @@ final class AssistantSettings {
     didSet { UserDefaults.standard.set(reasoningEffort.rawValue, forKey: Keys.reasoningEffort) }
   }
 
+  enum APIKeyAccess: Equatable {
+    case available
+    case missing
+    /// Saved, but macOS wants approval before VoxNotch may read it.
+    case needsApproval
+  }
+
+  /// Read lazily and silently — never at launch and never with a Keychain prompt. With
+  /// ad-hoc signed builds every update changes the signature, and the prompt macOS would
+  /// show can't be hidden from screen sharing. `approveAPIKeyAccess()` asks explicitly.
   var apiKey: String {
     get {
       access(keyPath: \.apiKey)
       if let cachedAPIKey { return cachedAPIKey }
-      let stored = KeychainStore.string(for: Self.apiKeyAccount) ?? ""
-      cachedAPIKey = stored
-      return stored
+      switch KeychainStore.read(Self.apiKeyAccount, interactive: false) {
+      case .value(let stored):
+        cachedAPIKey = stored
+        return stored
+      case .notFound:
+        cachedAPIKey = ""
+        return ""
+      case .needsApproval:
+        return ""
+      }
     }
     set {
       withMutation(keyPath: \.apiKey) { cachedAPIKey = newValue }
@@ -148,6 +163,29 @@ final class AssistantSettings {
   }
 
   @ObservationIgnored private var cachedAPIKey: String?
+
+  /// Silent check; never prompts.
+  func checkAPIKeyAccess() -> APIKeyAccess {
+    if let cachedAPIKey { return cachedAPIKey.isEmpty ? .missing : .available }
+    switch KeychainStore.read(Self.apiKeyAccount, interactive: false) {
+    case .value(let stored):
+      cachedAPIKey = stored
+      return .available
+    case .notFound:
+      return .missing
+    case .needsApproval:
+      return .needsApproval
+    }
+  }
+
+  /// Shows macOS's Keychain dialog. Only call from an explicit user action such as
+  /// the permission check — never during a live session.
+  @discardableResult
+  func approveAPIKeyAccess() -> Bool {
+    guard case .value(let stored) = KeychainStore.read(Self.apiKeyAccount, interactive: true) else { return false }
+    withMutation(keyPath: \.apiKey) { cachedAPIKey = stored }
+    return true
+  }
 
   // MARK: - Assistant
 

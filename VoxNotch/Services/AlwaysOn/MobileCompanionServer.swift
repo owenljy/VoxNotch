@@ -159,6 +159,7 @@ final class MobileCompanionServer {
       }
       if !self.hasConnectedClient, request.path == "/api/state", response.status == 200 || response.status == 304 {
         self.hasConnectedClient = true
+        UserDefaults.standard.set(true, forKey: AlwaysOnPermissions.localNetworkVerifiedKey)
         self.onPaired()
       }
       return response

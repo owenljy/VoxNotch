@@ -56,6 +56,13 @@ final class AssistantService {
       state.appendAnswer(answer)
       return nil
     }
+    // Never prompt for Keychain access here — the dialog would show on a shared screen.
+    guard settings.checkAPIKeyAccess() != .needsApproval else {
+      answer.status = .failed(
+        "macOS needs your approval to read the saved API key. Approve it in Settings → Always-On → Before Your Interview, ideally before you share your screen.")
+      state.appendAnswer(answer)
+      return nil
+    }
 
     // Partials are included directly, so the request doesn't wait for finalization;
     // flushing just makes the transcript pane settle sooner.

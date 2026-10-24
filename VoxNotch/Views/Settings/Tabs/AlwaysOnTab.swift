@@ -18,6 +18,7 @@ struct AlwaysOnTab: View {
 
   var body: some View {
     Form {
+      PermissionCheckSection()
       sessionSection
       MobileCompanionSettingsSection()
       promptSection

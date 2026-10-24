@@ -12,16 +12,38 @@ enum KeychainStore {
 
   private static let service = "com.voxnotch"
 
-  static func string(for account: String) -> String? {
+  nonisolated enum ReadResult: Equatable {
+    case value(String)
+    case notFound
+    /// The item exists but macOS wants the user to approve access (e.g. after
+    /// an update changed the app's signature).
+    case needsApproval
+  }
+
+  /// With `interactive: false` this never shows a macOS dialog. Only the legacy
+  /// interaction switch suppresses the keychain ACL prompt; kSecUseAuthenticationUIFail
+  /// does not (verified on macOS 27). The switch is process-wide, so it is restored
+  /// immediately after the read.
+  static func read(_ account: String, interactive: Bool) -> ReadResult {
     var query = baseQuery(account: account)
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
+    if !interactive {
+      SecKeychainSetUserInteractionAllowed(false)
+    }
+    defer { if !interactive { SecKeychainSetUserInteractionAllowed(true) } }
 
     var result: AnyObject?
-    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-          let data = result as? Data
-    else { return nil }
-    return String(data: data, encoding: .utf8)
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    switch status {
+    case errSecSuccess:
+      guard let data = result as? Data, let value = String(data: data, encoding: .utf8) else { return .notFound }
+      return .value(value)
+    case errSecItemNotFound:
+      return .notFound
+    default:
+      return .needsApproval
+    }
   }
 
   /// Stores `value`, or deletes the item when `value` is empty.

@@ -79,6 +79,7 @@ private struct AlwaysOnExpandedView: View {
     VStack(spacing: 0) {
       AlwaysOnHeaderView(style: style)
       Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+      PermissionBanner()
 
       GeometryReader { geometry in
         let available = max(geometry.size.height - PaneDivider.height, 1)
@@ -314,5 +315,43 @@ private struct PanelResizeHandle: View {
     .frame(width: 14, height: 14)
     .overlay(PanelMouseArea(role: .resize))
     .privacyAwareHelp("Resize")
+  }
+}
+
+// MARK: - Permission Banner
+
+/// Shown when a source was skipped for missing permission. Nothing was requested —
+/// a macOS prompt would appear on a shared screen — so this points to Settings.
+private struct PermissionBanner: View {
+
+  @Environment(AlwaysOnState.self) private var state
+
+  var body: some View {
+    if !state.permissionIssues.isEmpty {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundStyle(Color.notchAmber)
+        Text(message)
+          .foregroundStyle(.white.opacity(0.85))
+          .fixedSize(horizontal: false, vertical: true)
+        Spacer(minLength: 6)
+        Button("Fix in Settings") {
+          SettingsWindowController.shared.show(panel: .alwaysOn)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.notchBlue)
+      }
+      .font(.system(size: 11))
+      .padding(.horizontal, 14)
+      .padding(.vertical, 7)
+      .background(Color.notchAmber.opacity(0.12))
+    }
+  }
+
+  private var message: String {
+    let names = AudioSource.allCases.filter(state.permissionIssues.contains).map { source in
+      source == .microphone ? "Microphone" : "System audio"
+    }
+    return "\(names.joined(separator: " and ")) off — permission not granted. VoxNotch won't ask during a session."
   }
 }

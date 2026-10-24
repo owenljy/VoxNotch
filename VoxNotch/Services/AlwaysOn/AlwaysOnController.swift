@@ -232,10 +232,20 @@ final class AlwaysOnController {
     guard state.sessionID == sessionID, state.isActive else { throw CancellationError() }
   }
 
+  /// Sources without permission are skipped and reported, never requested: a macOS
+  /// permission dialog can't be hidden from screen sharing.
   private func startCapture(sources: Set<AudioSource>, into transcriber: LiveTranscriber, sessionID: String) async throws {
     for source in AudioSource.allCases where sources.contains(source) {
       try checkSession(sessionID)
-      try await beginCapture(source, into: transcriber, sessionID: sessionID).value
+      do {
+        try await beginCapture(source, into: transcriber, sessionID: sessionID).value
+      } catch let error as AlwaysOnPermissionError {
+        state.setSource(error.source, active: false)
+        state.permissionIssues.insert(error.source)
+      }
+    }
+    if state.activeSources.isEmpty, !state.permissionIssues.isEmpty {
+      throw AlwaysOnStartError.noPermittedSources
     }
   }
 
@@ -243,6 +253,8 @@ final class AlwaysOnController {
     captureCoordinator.start(source) {
       try self.checkSession(sessionID)
       guard !self.state.isPaused, self.state.activeSources.contains(source) else { throw CancellationError() }
+      // Check status only; starting capture without permission would make macOS prompt.
+      guard AlwaysOnPermissions.isGranted(source) else { throw AlwaysOnPermissionError(source: source) }
       await transcriber.startSource(source)
       try self.checkSession(sessionID)
 
@@ -262,6 +274,7 @@ final class AlwaysOnController {
       case .systemAudio:
         try await SystemAudioCaptureManager.shared.startStreaming(onSamples: onSamples)
       }
+      self.state.permissionIssues.remove(source)
     }
   }
 
@@ -278,6 +291,7 @@ final class AlwaysOnController {
               captureCoordinator.generations[source] == generation else { return }
         logger.error("Could not start \(source.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
         state.setSource(source, active: false)
+        if error is AlwaysOnPermissionError { state.permissionIssues.insert(source) }
       }
     }
   }
@@ -397,5 +411,16 @@ enum AlwaysOnShortcuts {
       })
     }
     HotkeyManager.shared.shortcuts = shortcuts
+  }
+}
+
+enum AlwaysOnStartError: LocalizedError {
+  case noPermittedSources
+
+  var errorDescription: String? {
+    switch self {
+    case .noPermittedSources:
+      "No audio permission yet. Open Settings → Always-On → Before Your Interview and grant access before you share your screen."
+    }
   }
 }
