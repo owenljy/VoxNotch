@@ -85,4 +85,13 @@ macOS 27.0.1 (26A434)，Apple Silicon Mac mini，主显示器。带基准判定�
 - 完整测试：296 项，0 失败，4 项条件测试跳过；已开启并实际执行 AppKit 像素矩阵。
 - arm64 Release 构建通过。
 - 探针和生产排除代码按 Swift 6、warnings-as-errors 单独编译通过。
-- 补充 `cgs-swiftui`、`both-swiftui` 模式，使用 `NSHostingView<Color>` 覆盖与应用 pane 相同的 SwiftUI 图层路径。最后一次尝试因系统没有连接可用显示器而跳过，**尚未完成像素验证**。窗口管理回归重复执行通过；不能把本次整体 `TEST SUCCEEDED` 当成 SwiftUI 像素通过。
+- 补充 `cgs-swiftui`、`both-swiftui` 模式，使用 `NSHostingView<Color>` 覆盖应用 pane 使用的 SwiftUI 图层路径。之前因显示器不可用跳过；2026-10-24 显示器恢复后重复执行两轮，**32 项检查、0 失败、0 跳过**，包括像素矩阵和窗口管理回归。
+
+### SwiftUI 补充验证（两轮一致）
+
+| 模式 | 共享中启用 | 重绘后 | 更新过滤器 | 截图 | 新捕获流 | 放大区域 | 快速重新开启 | 先保护再显示 | 关闭 / 快速关闭 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CGS + SwiftUI | 灰块 | 灰块 | 灰块 | 灰块 | 灰块 | 灰块 | 灰块 | 灰块 | 原内容恢复 |
+| `.none` + CGS + SwiftUI | 隐藏 | 隐藏 | 隐藏 | 隐藏 | 隐藏 | 隐藏 | 隐藏 | 隐藏 | 原内容恢复 |
+
+同次运行的普通 AppKit 窗口结果一致。这里验证的是独立窗口进程经过本机 ScreenCaptureKit 的捕获结果，仍不等于 Google Meet / Zoom 的远端接收画面验证。

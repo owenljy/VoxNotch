@@ -34,7 +34,8 @@ final class CaptureExclusionPixelTests: XCTestCase {
 
     for mode in ["none", "cgs", "both", "cgs-swiftui", "both-swiftui"] {
       let result = try await capture(mode: mode, probe: probe)
-      report.append("\(mode.padding(toLength: 5, withPad: " ", startingAt: 0)) \(result.summary)")
+      let label = mode.padding(toLength: max(5, mode.count), withPad: " ", startingAt: 0)
+      report.append("\(label) \(result.summary)")
       XCTAssertTrue(result.unprotected.allSamplesVisible, "\(mode): positive control must see the whole probe")
       XCTAssertFalse(result.desktop.visible, "\(mode): the sample point must not already be magenta")
       XCTAssertTrue(result.restored.allSamplesVisible, "\(mode): disabling must restore content")
