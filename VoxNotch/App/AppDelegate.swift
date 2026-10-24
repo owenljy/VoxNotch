@@ -366,6 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Refresh model states in case onboarding just downloaded a model
         FluidAudioModelManager.shared.refreshAllModelStates()
         MLXAudioModelManager.shared.refreshAllModelStates()
+        AlwaysOnModelPreloader.preloadAtLaunch()
     }
 
     // MARK: - Configuration

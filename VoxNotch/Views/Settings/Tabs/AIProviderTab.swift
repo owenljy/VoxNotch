@@ -29,6 +29,7 @@ struct AIProviderTab: View {
     Form {
       endpointSection
       modelSection
+      responseSection
       connectionSection
     }
     .formStyle(.grouped)
@@ -169,6 +170,35 @@ struct AIProviderTab: View {
       Text("Connection")
     } footer: {
       Text("Sends a tiny prompt and measures time to first token.")
+    }
+  }
+
+  private var responseSection: some View {
+    Section("Response timing") {
+      Stepper(value: $settings.firstTokenTimeout, in: 0.5...30, step: 0.5) {
+        LabeledContent("First token timeout") {
+          Text(settings.firstTokenTimeout, format: .number.precision(.fractionLength(1))) + Text(" s")
+        }
+      }
+      HStack {
+        TextField("Fallback model", text: $settings.fallbackModel, prompt: Text("Same model if empty"))
+          .autocorrectionDisabled()
+        PrivacyMenu {
+          Button("Retry the same model") { settings.fallbackModel = "" }
+          ForEach(availableModels, id: \.self) { model in
+            Button(model) { settings.fallbackModel = model }
+          }
+        } label: {
+          Image(systemName: "list.bullet")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Choose fallback model")
+      }
+      Text("If no answer text appears before the deadline, cancel that request and retry once. The fallback uses the same provider and API key. Once text starts, the answer is never restarted automatically.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
   }
 

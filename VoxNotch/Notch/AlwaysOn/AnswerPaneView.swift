@@ -112,7 +112,7 @@ private struct AnswerHeaderView: View {
     }
     if answer.trigger == .auto { parts.append("auto") }
     switch answer.status {
-    case .waiting: parts.append("thinking…")
+    case .waiting: parts.append(answer.retryCount > 0 ? "retrying…" : "thinking…")
     case .stopped: parts.append("stopped")
     case .failed: parts.append("failed")
     case .streaming, .done: break

@@ -55,6 +55,27 @@ supported. Ask with ⌃⌘↩ or enable automatic answers after questions and pa
 Prompt templates, vocabulary hints, input devices, answer text and panel
 appearance can be changed in Settings or from the panel.
 
+AI Provider settings include a **First token timeout** (default 1.5 seconds).
+If no visible answer text arrives, the stalled request is cancelled and retried
+once. **Fallback model** optionally selects another model on the same endpoint
+with the same API key; leave it empty to retry the primary model. For example,
+Groq's model ID is [`openai/gpt-oss-20b`](https://console.groq.com/docs/models).
+Each attempt has its own deadline. Hidden reasoning, keep-alives and whitespace
+do not count as answer text. Once an answer starts, it is not automatically
+restarted; API errors and failures after partial text remain visible. Increase
+the deadline for slower reasoning or local models.
+
+**Preload transcription at launch** is enabled by default in Always-On settings.
+After onboarding, already-downloaded Parakeet v2 and speech detection are prepared
+in the background, including a generated-silence warm-up. No audio is captured.
+Starting Always-On while preparation is running joins the same task; later
+sessions reuse the prepared models. Settings show preparation status and a
+**Prepare Now** button, which also downloads missing models. Startup does not
+silently download a second ASR model if Parakeet v2 is absent. Preparation still
+takes time after an update, but can happen before the meeting; starting the app
+and Always-On together may still wait for it. Memory pressure releases the cache
+while active sessions retain their own model references.
+
 The horizontal rail above Ask previews earlier answers as you move across its
 ticks. Move away to restore the previous answer, click to lock a page, or
 double-click to unlock and return. The lock button offers the same toggle;

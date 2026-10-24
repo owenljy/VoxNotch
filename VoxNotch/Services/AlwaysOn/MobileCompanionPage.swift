@@ -85,7 +85,7 @@ nonisolated enum MobileCompanionPage {
     const followingBottom = nearBottom(pane);
     if (changedPage && body.dataset.answerId) scrolls.set(body.dataset.answerId, pane.scrollTop);
     if (signature !== answerSignature) {
-      body.replaceChildren(answer ? markdown(answer.markdown || (answer.status === 'waiting' ? 'Thinking…' : '')) : node('p', 'Waiting for an answer from your Mac.', 'muted'));
+      body.replaceChildren(answer ? markdown(answer.markdown || (answer.status === 'waiting' ? (answer.retryCount > 0 ? 'Retrying…' : 'Thinking…') : '')) : node('p', 'Waiting for an answer from your Mac.', 'muted'));
       if (answer?.error) body.append(node('p', answer.error, 'error'));
       body.dataset.answerId = answer?.id || '';
       answerSignature = signature;
@@ -99,7 +99,7 @@ nonisolated enum MobileCompanionPage {
     $('history').setAttribute('aria-valuetext', `Answer ${index + 1} of ${count}`);
     $('follow').textContent = selectedID ? 'Follow Mac' : 'Following Mac';
     $('follow').disabled = !selectedID;
-    $('answer-meta').textContent = answer ? [answer.template, answer.model, ['waiting', 'streaming', 'stopped'].includes(answer.status) ? answer.status : ''].filter(Boolean).join(' · ') : '';
+    $('answer-meta').textContent = answer ? [answer.template, answer.model, answer.status === 'waiting' && answer.retryCount > 0 ? 'retrying' : (['waiting', 'streaming', 'stopped'].includes(answer.status) ? answer.status : '')].filter(Boolean).join(' · ') : '';
   }
   function applySnapshot(value) {
     if (sessionID !== value.sessionID) {

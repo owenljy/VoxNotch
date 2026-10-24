@@ -20,6 +20,7 @@ final class AssistantService {
   private let settings: AssistantSettings
   private let historyStore: AlwaysOnHistoryStore
   private let makeStream: StreamFactory
+  private let deadlineSleep: FirstTokenRetryStream.Sleep
   private let logger = Logger(subsystem: "com.voxnotch", category: "AssistantService")
 
   private var currentTask: Task<Void, Never>?
@@ -35,12 +36,14 @@ final class AssistantService {
     state: AlwaysOnState? = nil,
     settings: AssistantSettings? = nil,
     historyStore: AlwaysOnHistoryStore? = nil,
-    makeStream: @escaping StreamFactory = { OpenAICompatibleClient.shared.streamChat(messages: $0, config: $1) }
+    makeStream: @escaping StreamFactory = { OpenAICompatibleClient.shared.streamChat(messages: $0, config: $1) },
+    deadlineSleep: @escaping FirstTokenRetryStream.Sleep = { try await Task.sleep(for: $0) }
   ) {
     self.state = state ?? .shared
     self.settings = settings ?? .shared
     self.historyStore = historyStore ?? .shared
     self.makeStream = makeStream
+    self.deadlineSleep = deadlineSleep
   }
 
   var isAnswering: Bool { currentTask != nil }
@@ -80,8 +83,13 @@ final class AssistantService {
     currentTrigger = trigger
     let sessionID = state.sessionID
     currentSessionID = sessionID
-    let stream = makeStream(messages, config)
-    currentTask = Task { await run(answerID: answer.id, sessionID: sessionID, stream: stream) }
+    let answerID = answer.id
+    let retryConfig = settings.retryConfig(primary: config)
+    let timeout = Duration.seconds(AssistantSettings.normalizedFirstTokenTimeout(settings.firstTokenTimeout))
+    currentTask = Task {
+      await run(answerID: answerID, sessionID: sessionID, messages: messages,
+                config: config, retryConfig: retryConfig, timeout: timeout)
+    }
     return answer.id
   }
 
@@ -125,7 +133,19 @@ final class AssistantService {
 
   // MARK: - Streaming
 
-  private func run(answerID: UUID, sessionID: String, stream: AsyncThrowingStream<String, Error>) async {
+  private func noteRetry(answerID: UUID, sessionID: String, config: OpenAICompatibleConfig) {
+    guard currentAnswerID == answerID, state.sessionID == sessionID else { return }
+    state.updateAnswer(answerID) {
+      $0.model = config.model
+      $0.retryCount = 1
+    }
+    logger.info("First token timed out; retrying with \(config.model, privacy: .public)")
+  }
+
+  private func run(
+    answerID: UUID, sessionID: String, messages: [ChatMessage],
+    config: OpenAICompatibleConfig, retryConfig: OpenAICompatibleConfig, timeout: Duration
+  ) async {
     defer {
       if currentAnswerID == answerID {
         currentTask = nil
@@ -136,6 +156,14 @@ final class AssistantService {
       }
     }
     guard currentAnswerID == answerID, state.sessionID == sessionID, !Task.isCancelled else { return }
+    // Create the stream only once the consuming task owns the session. An
+    // immediate Stop/new session must not leave an unconsumed request running.
+    let stream = FirstTokenRetryStream.stream(
+      messages: messages, primary: config, retry: retryConfig, timeout: timeout,
+      makeStream: makeStream, sleep: deadlineSleep
+    ) { [weak self] retryConfig in
+      await self?.noteRetry(answerID: answerID, sessionID: sessionID, config: retryConfig)
+    }
     let clock = ContinuousClock()
     let start = clock.now
     let buffer = StreamBuffer(interval: Self.flushInterval) { [weak self] text in

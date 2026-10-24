@@ -171,4 +171,65 @@ final class AssistantServiceTests: XCTestCase {
     XCTAssertTrue(state.answers.isEmpty)
     XCTAssertNil(service.currentAnswerID)
   }
+
+  func testTimeoutRetriesSameAnswerAndRecordsTheActualFallbackModel() async throws {
+    let clock = ManualFirstTokenDeadline()
+    let harness = FirstTokenStreamHarness()
+    let settings = AssistantSettings.shared
+    let previous = settings.fallbackModel
+    settings.fallbackModel = "fallback-test"
+    defer { settings.fallbackModel = previous }
+    let queue = try DatabaseQueue()
+    try DatabaseManager.makeMigrator().migrate(queue)
+    let history = AlwaysOnHistoryStore(databaseManager: queue, settings: HistorySettings())
+    let service = AssistantService(
+      historyStore: history, makeStream: { harness.stream($0, $1) },
+      deadlineSleep: { try await clock.sleep($0) })
+    defer { service.stop() }
+    let id = try XCTUnwrap(service.ask(trigger: .manual))
+    while await clock.pendingCount == 0 { await Task.yield() }
+    await clock.fire()
+    try await waitUntil { harness.count == 2 && self.state.answers[0].retryCount == 1 }
+    XCTAssertEqual(state.answers.count, 1, "Retry must keep the same history page")
+    XCTAssertEqual(state.answers[0].id, id)
+    XCTAssertEqual(state.answers[0].model, "fallback-test")
+    XCTAssertTrue(harness.isTerminated(0))
+    harness.yield("Recovered", attempt: 1)
+    harness.finish(attempt: 1)
+    try await waitUntil { !service.isAnswering }
+    XCTAssertEqual(state.answers[0].markdown, "Recovered")
+    XCTAssertEqual(state.answers[0].status, .done)
+    let saved = try await history.answers(for: state.sessionID)
+    XCTAssertEqual(saved.first?.model, "fallback-test")
+    XCTAssertEqual(saved.count, 1)
+    XCTAssertEqual(MobileCompanionSnapshot(state: state).answers.first?.retryCount, 1)
+  }
+
+  func testDiscardBeforeFirstTokenCancelsRequestWithoutRetryOrHistoryResurrection() async throws {
+    let clock = ManualFirstTokenDeadline()
+    let harness = FirstTokenStreamHarness()
+    let service = AssistantService(
+      makeStream: { harness.stream($0, $1) }, deadlineSleep: { try await clock.sleep($0) })
+    defer { service.stop() }
+    let id = try XCTUnwrap(service.ask(trigger: .auto))
+    try await waitUntil { harness.count == 1 }
+    service.discard(id)
+    try await waitUntil { harness.isTerminated(0) }
+    await clock.fire()
+    harness.yield("Late result", attempt: 0)
+    await Task.yield()
+    XCTAssertTrue(state.answers.isEmpty)
+    XCTAssertEqual(harness.count, 1)
+    XCTAssertFalse(service.isAnswering)
+  }
+
+  func testImmediateStopDoesNotStartAnUnconsumedRequest() async throws {
+    let harness = FirstTokenStreamHarness()
+    let service = AssistantService(makeStream: { harness.stream($0, $1) })
+    service.ask(trigger: .auto)
+    service.stop()
+    for _ in 0..<10 { await Task.yield() }
+    XCTAssertEqual(harness.count, 0)
+    XCTAssertEqual(state.answers.first?.status, .stopped)
+  }
 }
