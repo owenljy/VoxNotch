@@ -160,6 +160,65 @@ final class WindowPrivacyManagerTests: XCTestCase {
     await fulfillment(of: [drawn], timeout: 3)
   }
 
+  func testCaptureExclusionFollowsPreferenceAndWindowSize() {
+    var hidden = true
+    var calls: [CGSize?] = []
+    let notifications = NotificationCenter()
+    let privacy = WindowPrivacyManager(
+      hidesContent: { hidden }, windows: { [] },
+      applyCaptureExclusion: { _, size in calls.append(size); return true },
+      notifications: notifications, workspaceNotifications: NotificationCenter()
+    )
+    let window = window()
+    privacy.prepare(window)
+    XCTAssertEqual(calls, [CGSize(width: 320, height: 200)])
+
+    window.setContentSize(NSSize(width: 480, height: 260))
+    notifications.post(name: NSWindow.didResizeNotification, object: window)
+    XCTAssertEqual(calls.last, CGSize(width: 480, height: 260), "Resizing must widen the excluded region")
+
+    hidden = false
+    notifications.post(name: .hideFromScreenRecordingChanged, object: nil)
+    XCTAssertEqual(calls.last, .some(nil), "Disabling must clear the exclusion")
+  }
+
+  func testCaptureExclusionUpdatesOnlyOnChangeAndRetriesFailures() {
+    var accepts = false
+    var calls = 0
+    let notifications = NotificationCenter()
+    let privacy = WindowPrivacyManager(
+      hidesContent: { true }, windows: { [] },
+      applyCaptureExclusion: { _, _ in calls += 1; return accepts },
+      notifications: notifications, workspaceNotifications: NotificationCenter()
+    )
+    let window = window()
+    privacy.prepare(window)
+    XCTAssertEqual(calls, 1)
+
+    accepts = true
+    notifications.post(name: NSWindow.didUpdateNotification, object: window)
+    XCTAssertEqual(calls, 2, "A rejected exclusion is retried on the next update")
+    notifications.post(name: NSWindow.didUpdateNotification, object: window)
+    XCTAssertEqual(calls, 2, "An accepted exclusion is not resent on every update")
+  }
+
+  func testSystemCaptureExclusionAcceptsOwnWindows() throws {
+    try XCTSkipUnless(CaptureExclusion.isAvailable, "SkyLight capture exclusion is not exported")
+    let window = window()
+    XCTAssertTrue(CaptureExclusion.apply(to: window, size: window.frame.size))
+    XCTAssertTrue(CaptureExclusion.apply(to: window, size: nil))
+
+    let deferred = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 50, height: 50),
+      styleMask: [.borderless], backing: .buffered, defer: true
+    )
+    deferred.isReleasedWhenClosed = false
+    XCTAssertFalse(
+      CaptureExclusion.apply(to: deferred, size: deferred.frame.size),
+      "A window without a window-server window cannot be excluded yet"
+    )
+  }
+
   func testPreparingPanelDoesNotActivateOrReplaceKeyWindow() {
     let panel = NotchPanel(
       contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel, .utilityWindow],
