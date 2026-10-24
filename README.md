@@ -174,6 +174,17 @@ When post-processing is off, ITN and filler word removal still run on-device.
 
 The modifier combination is configurable in Settings.
 
+## Microphone troubleshooting
+
+If microphone startup reports CoreAudio error `-10868`, the input format is not
+supported. One cause is having no usable microphone: the hardware input then
+reports zero channels and a zero sample rate. Check System Settings → Sound →
+Input and choose a connected microphone in VoxNotch's Microphone menu. A virtual
+audio device appearing in the list does not necessarily provide a default input.
+For Always-On with computer audio only, turn off Microphone in Settings → Always-On
+and leave System Audio enabled. The [engine input documentation](https://developer.apple.com/documentation/avfaudio/avaudioengine/inputnode)
+describes how unavailable input must be checked before capture.
+
 ## Limitations
 
 - **Intel Macs are untested.** Apple Silicon is required for the bundled ASR models; Intel support is not a goal.

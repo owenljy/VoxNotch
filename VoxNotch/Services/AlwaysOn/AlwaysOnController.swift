@@ -319,7 +319,9 @@ final class AlwaysOnController {
     teardown()
     historyStore.endSession(id: sessionID, endedAt: Date(), cleanly: false)
     state.end()
-    state.status = .failed(error.localizedDescription)
+    let message = [error.localizedDescription, (error as? LocalizedError)?.recoverySuggestion]
+      .compactMap { $0 }.joined(separator: " ")
+    state.status = .failed(message)
   }
 
   private func teardown() {

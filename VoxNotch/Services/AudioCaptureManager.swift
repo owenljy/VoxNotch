@@ -28,7 +28,7 @@ final class AudioCaptureManager {
         var errorDescription: String? {
             switch self {
             case .noInputAvailable:
-                return "No microphone found"
+                return "No microphone input is available."
             case .engineStartFailed(let underlying):
                 return "Microphone failed to start: \(underlying.localizedDescription)"
             case .permissionDenied:
@@ -43,7 +43,7 @@ final class AudioCaptureManager {
         var recoverySuggestion: String? {
             switch self {
             case .noInputAvailable:
-                return "Connect a microphone and try again"
+                return "Connect or select a microphone. For computer audio only, turn off Microphone in Always-On settings."
             case .engineStartFailed:
                 return "Try again — restart the app if it persists"
             case .permissionDenied:
@@ -122,9 +122,11 @@ final class AudioCaptureManager {
     /// Listener block reference for device change notifications
     private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
 
-    /// Whether any input device is available
+    /// Whether the selected input (or system default) exists. Virtual devices
+    /// may advertise input streams without being a usable system default.
     var hasInputDevice: Bool {
-        !availableInputDevices().isEmpty
+        let deviceID = selectedDeviceID ?? defaultInputDeviceID()
+        return deviceID != 0 && availableInputDevices().contains { $0.id == deviceID }
     }
 
     /// Notification posted when the set of available input devices changes
@@ -286,6 +288,9 @@ final class AudioCaptureManager {
     /// the chosen ID fails (device gone, ID drifted), falls back to the system
     /// default so `engine.start()` has at least *some* valid device attached.
     private func applySelectedDevice() {
+        // With no default input, AVAudioEngine can expose an output-only AUHAL
+        // with a placeholder input format. Do not treat that as a microphone.
+        guard (selectedDeviceID ?? defaultInputDeviceID()) != 0 else { return }
         let inputNode = audioEngine.inputNode
 
         guard let audioUnit = inputNode.audioUnit else {
@@ -314,7 +319,7 @@ final class AudioCaptureManager {
             /// Revert to system default
             var defaultDeviceID = defaultInputDeviceID()
             if defaultDeviceID != 0 {
-                AudioUnitSetProperty(
+                let status = AudioUnitSetProperty(
                     audioUnit,
                     kAudioOutputUnitProperty_CurrentDevice,
                     kAudioUnitScope_Global,
@@ -322,6 +327,9 @@ final class AudioCaptureManager {
                     &defaultDeviceID,
                     UInt32(MemoryLayout<AudioDeviceID>.size)
                 )
+                if status != noErr {
+                    logger.error("Failed to set default input device (\(defaultDeviceID)): \(status)")
+                }
             }
         }
     }
@@ -369,11 +377,7 @@ final class AudioCaptureManager {
 
     /// Start listening for device connect/disconnect events
     func startDeviceChangeListener() {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
+        guard deviceChangeListenerBlock == nil else { return }
 
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             DispatchQueue.main.async {
@@ -381,14 +385,12 @@ final class AudioCaptureManager {
                     return
                 }
 
-                let hasDevice = self.hasInputDevice
-                AppState.shared.noMicrophoneDetected = !hasDevice
-
                 /// Re-resolve by UID first (device IDs shift on USB/Bluetooth
                 /// churn and sleep/wake; the UID is stable). Falls through to
                 /// clearing the live ID only when the device is truly gone —
                 /// the UID stays persisted so it auto-reconnects later.
                 self.refreshSelectedDeviceFromPersistedUID()
+                AppState.shared.noMicrophoneDetected = !self.hasInputDevice
 
                 NotificationCenter.default.post(
                     name: Self.inputDevicesChangedNotification,
@@ -399,12 +401,13 @@ final class AudioCaptureManager {
 
         deviceChangeListenerBlock = block
 
-        AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            DispatchQueue.main,
-            block
-        )
+        for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice] {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, .main, block)
+        }
     }
 
     /// Stop listening for device changes
@@ -413,18 +416,13 @@ final class AudioCaptureManager {
             return
         }
 
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            DispatchQueue.main,
-            block
-        )
+        for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice] {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, .main, block)
+        }
 
         deviceChangeListenerBlock = nil
     }
@@ -551,9 +549,24 @@ final class AudioCaptureManager {
 
     // MARK: - Recording
 
-    /// Start recording audio from the microphone
-    /// - Throws: AudioCaptureError if recording cannot start
-    private func installTapIfNeeded() {
+    /// Use the hardware-side format, not the output bus's fallback (which can
+    /// report 44.1 kHz stereo even when there is no input at all).
+    static func validateMicrophoneInput(
+        deviceID: AudioDeviceID,
+        hardwareFormat: () -> (sampleRate: Double, channelCount: AVAudioChannelCount)
+    ) throws {
+        guard deviceID != 0 else { throw AudioCaptureError.noInputAvailable }
+        let format = hardwareFormat()
+        guard format.sampleRate.isFinite, format.sampleRate > 0, format.channelCount > 0 else {
+            throw AudioCaptureError.noInputAvailable
+        }
+    }
+
+    private func installTapIfNeeded() throws {
+        try Self.validateMicrophoneInput(deviceID: selectedDeviceID ?? defaultInputDeviceID()) {
+            let format = audioEngine.inputNode.inputFormat(forBus: 0)
+            return (format.sampleRate, format.channelCount)
+        }
         guard !isTapInstalled else { return }
         let inputNode = audioEngine.inputNode
 
@@ -638,6 +651,7 @@ final class AudioCaptureManager {
         // Re-resolve the selected device from its stable UID in case AudioDeviceIDs
         // churned since last use (sleep/wake, USB/Bluetooth reconnect).
         refreshSelectedDeviceFromPersistedUID()
+        guard hasInputDevice else { throw AudioCaptureError.noInputAvailable }
 
         if isRecording {
             logger.debug("Already recording, restarting tap...")
@@ -667,7 +681,7 @@ final class AudioCaptureManager {
             applySelectedDevice()
         }
 
-        installTapIfNeeded()
+        try installTapIfNeeded()
 
         do {
             audioEngine.prepare()
@@ -677,9 +691,8 @@ final class AudioCaptureManager {
             logger.info("Started recording")
         } catch {
             logger.warning("Failed to start engine: \(error.localizedDescription), rebuilding engine...")
-            rebuildAudioEngine()
-
             do {
+                try rebuildAudioEngine()
                 audioEngine.prepare()
                 try audioEngine.start()
                 isRecording = true
@@ -690,6 +703,7 @@ final class AudioCaptureManager {
                     audioEngine.inputNode.removeTap(onBus: 0)
                     isTapInstalled = false
                 }
+                if let captureError = fallbackError as? AudioCaptureError { throw captureError }
                 throw AudioCaptureError.engineStartFailed(fallbackError)
             }
         }
@@ -699,7 +713,7 @@ final class AudioCaptureManager {
     /// `reset()` clears engine state but keeps the same underlying AUHAL; for
     /// certain CoreAudio failure modes (stale device after sleep, format desync
     /// after mic unplug/replug) only a new engine fully recovers.
-    private func rebuildAudioEngine() {
+    private func rebuildAudioEngine() throws {
         if isTapInstalled {
             audioEngine.inputNode.removeTap(onBus: 0)
             isTapInstalled = false
@@ -716,7 +730,7 @@ final class AudioCaptureManager {
         refreshSelectedDeviceFromPersistedUID()
 
         applySelectedDevice()
-        installTapIfNeeded()
+        try installTapIfNeeded()
     }
 
     /// Start continuous capture that delivers 16kHz mono samples to `onSamples` on the audio thread.
@@ -810,7 +824,7 @@ final class AudioCaptureManager {
     /// Pre-warm the AVAudioEngine to eliminate first-use startup latency.
     /// Must be called from the main thread. Safe to call when not recording.
     func warmUp() {
-        guard hasMicrophonePermission, !isRecording else { return }
+        guard hasMicrophonePermission, !isRecording, hasInputDevice else { return }
         // Just initialize the input node and apply the device to save time on first start.
         // We avoid calling prepare() and stop() here because starting and immediately
         // stopping the CoreAudio HAL can leave it in a corrupted state where the next
