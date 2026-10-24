@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.2
+
+- Add a QR-paired Phone View on the same Wi-Fi, with live transcripts and answers, independent answer history, adjustable panes, and iPad layouts. Enabling it hides the Mac panes while keeping the pairing window available.
+- Add a horizontal answer history rail with hover previews, click-to-lock, and double-click-to-return.
+- Retry once when no answer text arrives within 1.5 seconds, with a configurable timeout and optional fallback model in AI Provider settings.
+- Preload downloaded Always-On transcription models at launch and reuse prepared models across sessions.
+- Validate microphone input before capture and report missing or invalid devices with actionable guidance.
+- Check permissions before starting capture or asking the AI, with explicit setup controls to resolve missing permissions before a session.
+- Harden window capture requests across windows, popovers, resizing, and lifecycle changes. Add a best-effort CGS redaction fallback, including refresh handling for live toggles and resized surfaces. Capture compatibility depends on the recorder; the fallback can appear as a grey rectangle.
+- Improve the Coding Interview template with Python-only, plain-spoken answers, and add configurable reasoning effort.
+- Sign releases with a stable certificate to preserve the app identity across future updates. **This is the first release using that certificate: upgrading from an earlier ad-hoc-signed version may require granting macOS permissions again once.**
+
+Build number: 9.
+
 ## 0.5.1
 
 - Add editable Always-On prompt templates, vocabulary hints, answer navigation shortcuts, and microphone/output device controls.
