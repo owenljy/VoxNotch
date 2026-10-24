@@ -2,6 +2,8 @@
 
 ## 0.5.4
 
+- Fix CI certificate lookup and code-signing trust, verify a real signed executable before building, and allow safe retries of unpublished tags with an exact-commit CI check.
+
 - Work around the Swift 6.3.3 Release compiler crash in the preloaded model cache deallocator, keeping model loading optimized and checking the workaround before the full archive. The v0.5.3 attempt passed tests but did not publish an installer.
 
 - Verify privacy restoration requests without relying on AppKit's stale `sharingType` readback, and isolate AI service tests from the machine's Keychain state. The v0.5.2 attempt failed the test gate and did not publish an installer.

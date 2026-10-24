@@ -97,3 +97,33 @@ The shared CI workflow compiles this file with `-O` and checks that exact
 deallocator before spending time building dependencies or the release archive. Keep this narrow compiler
 workaround until the pinned toolchain is verified to no longer need it. No
 v0.5.3 installer was published; v0.5.4 retries with the workaround.
+
+## Signing preflight and retrying an unpublished tag
+
+The first v0.5.4 run passed tests and the cloud Release archive, but `codesign`
+reported `no identity found`. The imported temporary keychain was absent from the
+user search list, and the self-signed certificate had no code-signing trust on the
+hosted runner. The workflow now adds the keychain to that list, grants the pinned
+public certificate code-signing trust on the ephemeral runner, checks a valid
+identity, and signs and verifies a small real executable before building. Cleanup
+removes the trust, public certificate, and temporary keychain. This does not
+change trust settings on a developer or user's Mac.
+
+To validate signing without a full build:
+
+```sh
+gh workflow run release.yml --ref main -f release_tag=v0.5.4 -F preflight_only=true
+```
+
+To retry the existing unpublished tag with the updated workflow:
+
+```sh
+gh workflow run release.yml --ref main -f release_tag=v0.5.4
+```
+
+Optionally pass `-f verified_ci_run=40096813538` to reuse that successful CI run
+for v0.5.4. The workflow resolves annotated tags to their commit and verifies that
+the run belongs to this repository, is a successful push of `ci.yml`, and tests
+that exact commit before accepting it as the test gate. Without this input, it
+runs tests normally. The retry always checks out the specified tag for the build;
+it never moves the tag and refuses to replace an existing GitHub Release.

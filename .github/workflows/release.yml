@@ -1,34 +1,172 @@
 name: Build & Release
+run-name: Release ${{ inputs.release_tag || github.ref_name }}${{ inputs.preflight_only && ' (signing check)' || '' }}
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing unpublished vMAJOR.MINOR.PATCH tag to build
+        required: true
+        type: string
+      verified_ci_run:
+        description: Optional successful CI run for this exact tag commit
+        required: false
+        default: ''
+        type: string
+      preflight_only:
+        description: Only validate signing; skip building and publishing
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  SIGNING_CERT_SHA1: A722522038615D41E96104CBE6110D94EAD809B4
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
+  signing-preflight:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - name: Validate unpublished release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_CI_RUN: ${{ inputs.verified_ci_run }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.error, urllib.request
+          tag = os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
+              raise SystemExit('An existing vMAJOR.MINOR.PATCH tag is required')
+          base = 'https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY']
+          def fetch(path):
+              request = urllib.request.Request(base + path, headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              })
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+          target = fetch('/git/ref/tags/' + tag)['object']
+          while target['type'] == 'tag':
+              target = fetch('/git/tags/' + target['sha'])['object']
+          if target['type'] != 'commit':
+              raise SystemExit('Release tag must resolve to a commit')
+          ci_run = os.environ.get('VERIFIED_CI_RUN', '')
+          if ci_run:
+              if not ci_run.isdigit():
+                  raise SystemExit('CI run id must be numeric')
+              run = fetch('/actions/runs/' + ci_run)
+              if (run.get('head_sha') != target['sha'] or run.get('conclusion') != 'success'
+                      or run.get('path') != '.github/workflows/ci.yml'
+                      or run.get('head_repository', {}).get('full_name') != os.environ['GITHUB_REPOSITORY']
+                      or run.get('event') != 'push'):
+                  raise SystemExit('CI run must be a successful push CI for this exact tag commit')
+              print('Verified prior CI: ' + run['html_url'] + ' at ' + target['sha'])
+          try:
+              fetch('/releases/tags/' + tag)
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+          else:
+              raise SystemExit('Release already exists; refusing to replace published assets')
+          print('Validated unpublished tag ' + tag)
+          PY
+
+      - &import_signing
+        name: Import and trust signing certificate
+        env:
+          P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$P12_BASE64" ] || [ -z "$P12_PASSWORD" ]; then
+            echo "::error::MACOS_SIGNING_CERT_P12 / MACOS_SIGNING_CERT_PASSWORD secrets are missing"
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security find-identity -p codesigning "$keychain" | grep -q "$SIGNING_CERT_SHA1" \
+            || { echo "::error::Imported certificate does not match SIGNING_CERT_SHA1"; exit 1; }
+          # --keychain limits identity lookup, but chain construction still needs
+          # the user's search list. Preserve its existing entries.
+          python3 - "$keychain" <<'PY'
+          import shlex, subprocess, sys
+          previous = shlex.split(subprocess.check_output(['security', 'list-keychains', '-d', 'user'], text=True))
+          subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', sys.argv[1], *previous], check=True)
+          PY
+          # Trust only this pinned certificate for code signing on the ephemeral
+          # hosted runner. Export public certificates, never the private key.
+          security export -k "$keychain" -t certs -f pemseq -o "$RUNNER_TEMP/signing-cert.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/signing-cert.pem"
+          security find-identity -v -p codesigning "$keychain" | grep -q "$SIGNING_CERT_SHA1" \
+            || { echo "::error::Release identity is not valid for code signing"; exit 1; }
+
+      - &probe_signing
+        name: Verify signing with a real executable
+        run: |
+          set -euo pipefail
+          printf 'int main(void) { return 0; }\n' > "$RUNNER_TEMP/signing-probe.c"
+          xcrun clang -arch arm64 "$RUNNER_TEMP/signing-probe.c" -o "$RUNNER_TEMP/signing-probe"
+          codesign --force --sign "$SIGNING_CERT_SHA1" --keychain "$SIGNING_KEYCHAIN" \
+            --timestamp=none --identifier com.jingyuanliang.VoxNotch.SigningProbe "$RUNNER_TEMP/signing-probe"
+          codesign --verify --strict --verbose=2 "$RUNNER_TEMP/signing-probe"
+          expected_requirement=$(printf 'certificate root = H"%s"' "$SIGNING_CERT_SHA1")
+          codesign -d -r- "$RUNNER_TEMP/signing-probe" 2>&1 | grep -Fi "$expected_requirement"
+
+      - &cleanup_signing
+        name: Remove signing trust and keychain
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/signing-cert.pem" ]; then
+            sudo security remove-trusted-cert -d "$RUNNER_TEMP/signing-cert.pem" || true
+            sudo security delete-certificate -Z "$SIGNING_CERT_SHA1" /Library/Keychains/System.keychain || true
+          fi
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then security delete-keychain "$SIGNING_KEYCHAIN" || true; fi
+          rm -f "$RUNNER_TEMP/signing-cert.pem" "$RUNNER_TEMP/signing.p12"
+
   test:
+    needs: signing-preflight
+    if: ${{ !inputs.preflight_only && !inputs.verified_ci_run }}
     uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.release_tag || github.ref }}
 
   build:
-    needs: test
+    needs: [signing-preflight, test]
+    if: >-
+      ${{ always() && !cancelled() && !inputs.preflight_only
+          && needs['signing-preflight'].result == 'success'
+          && (needs.test.result == 'success'
+              || (needs.test.result == 'skipped' && inputs.verified_ci_run != '')) }}
     runs-on: macos-26
     timeout-minutes: 45
     permissions:
       contents: write
-    env:
-      # Stable self-signed identity: macOS keys permissions (microphone, screen
-      # recording, accessibility, Keychain) to the designated requirement, so every
-      # release must be signed by this exact certificate or users lose their grants.
-      SIGNING_CERT_SHA1: A722522038615D41E96104CBE6110D94EAD809B4
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -42,7 +180,7 @@ jobs:
 
       - name: Validate release tag
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           python3 - <<'PY'
           import os, pathlib, re
@@ -59,6 +197,10 @@ jobs:
               env.write(f"RELEASE_BUILD={build}\n")
           print(f"Releasing {tag} ({build})")
           PY
+
+      - *import_signing
+
+      - *probe_signing
 
       - name: Build Release archive
         run: |
@@ -79,33 +221,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee "$RUNNER_TEMP/archive.log"
 
-      - name: Import signing certificate
-        env:
-          P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12 }}
-          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -z "$P12_BASE64" ] || [ -z "$P12_PASSWORD" ]; then
-            echo "::error::MACOS_SIGNING_CERT_P12 / MACOS_SIGNING_CERT_PASSWORD secrets are missing"
-            exit 1
-          fi
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          keychain_password="$(uuidgen)"
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 3600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
-          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
-          rm -f "$RUNNER_TEMP/signing.p12"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
-          # Self-signed, so it is listed as untrusted; codesign only needs the private key.
-          security find-identity -p codesigning "$keychain" | grep -q "$SIGNING_CERT_SHA1" \
-            || { echo "::error::Imported certificate does not match SIGNING_CERT_SHA1"; exit 1; }
-          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
-
       - name: Export and verify app version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/export"
@@ -146,7 +264,7 @@ jobs:
 
       - name: Verify packaged app
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
@@ -166,16 +284,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             ${{ runner.temp }}/VoxNotch.dmg
             ${{ runner.temp }}/VoxNotch.dmg.sha256
           fail_on_unmatched_files: true
           generate_release_notes: true
 
-      - name: Remove signing keychain
-        if: always()
-        run: |
-          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then security delete-keychain "$SIGNING_KEYCHAIN" || true; fi
+      - *cleanup_signing
 
       - name: Save archive diagnostics
         if: always()
