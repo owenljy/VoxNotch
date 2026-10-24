@@ -202,11 +202,50 @@ final class WindowPrivacyManagerTests: XCTestCase {
     XCTAssertEqual(calls, 2, "An accepted exclusion is not resent on every update")
   }
 
+  func testCaptureSurfaceRefreshesOnTransitionsWithoutDrawingLoop() {
+    var hidden = false
+    var accepts = true
+    var refreshes = 0
+    let notifications = NotificationCenter()
+    let privacy = WindowPrivacyManager(
+      hidesContent: { hidden }, windows: { [] },
+      applyCaptureExclusion: { _, _ in accepts },
+      refreshCaptureSurface: { _, _ in refreshes += 1 },
+      notifications: notifications, workspaceNotifications: NotificationCenter()
+    )
+    let window = window()
+    privacy.prepare(window)
+    refreshes = 0
+
+    hidden = true
+    notifications.post(name: .hideFromScreenRecordingChanged, object: nil)
+    XCTAssertEqual(refreshes, 1, "Enabling must refresh an existing captured surface")
+
+    // viewWillDraw calls prepare again. That must not schedule an endless redraw.
+    privacy.prepare(window)
+    notifications.post(name: NSWindow.didUpdateNotification, object: window)
+    XCTAssertEqual(refreshes, 1)
+
+    window.setContentSize(NSSize(width: 480, height: 260))
+    notifications.post(name: NSWindow.didResizeNotification, object: window)
+    XCTAssertEqual(refreshes, 2, "Newly covered pixels must be refreshed after resizing")
+
+    hidden = false
+    accepts = false
+    notifications.post(name: .hideFromScreenRecordingChanged, object: nil)
+    XCTAssertEqual(refreshes, 2, "A rejected request must remain retryable")
+    accepts = true
+    notifications.post(name: NSWindow.didUpdateNotification, object: window)
+    XCTAssertEqual(refreshes, 3, "Clearing a mask must refresh the restored surface")
+  }
+
   func testSystemCaptureExclusionAcceptsOwnWindows() throws {
     try XCTSkipUnless(CaptureExclusion.isAvailable, "SkyLight capture exclusion is not exported")
     let window = window()
     XCTAssertTrue(CaptureExclusion.apply(to: window, size: window.frame.size))
     XCTAssertTrue(CaptureExclusion.apply(to: window, size: nil))
+    XCTAssertFalse(CaptureExclusion.apply(to: window, size: .zero))
+    XCTAssertFalse(CaptureExclusion.apply(to: window, size: CGSize(width: CGFloat.nan, height: 100)))
 
     let deferred = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 50, height: 50),
@@ -217,6 +256,41 @@ final class WindowPrivacyManagerTests: XCTestCase {
       CaptureExclusion.apply(to: deferred, size: deferred.frame.size),
       "A window without a window-server window cannot be excluded yet"
     )
+  }
+
+  func testRefreshCoalescesTransitionsAndRestoresViewHierarchyWithoutTakingFocus() async throws {
+    let window = window()
+    let content = NSView(frame: NSRect(origin: .zero, size: window.frame.size))
+    window.contentView = content
+    window.orderFront(nil)
+    defer { window.close() }
+    let frame = window.frame
+    let keyWindow = NSApp.keyWindow
+    let active = NSApp.isActive
+
+    CaptureExclusion.refreshSurface(of: window, size: window.frame.size)
+    // An old queued enable must not override a newer clear request.
+    CaptureExclusion.refreshSurface(of: window, size: nil)
+    try await Task.sleep(for: .milliseconds(180))
+
+    XCTAssertTrue(content.subviews.isEmpty, "The temporary refresh must leave no visible overlay behind")
+    XCTAssertEqual(window.frame, frame)
+    XCTAssertTrue(NSApp.keyWindow === keyWindow)
+    XCTAssertEqual(NSApp.isActive, active)
+  }
+
+  func testUnavailableCaptureExclusionStillAppliesSharingPreference() {
+    var hidden = true
+    let window = window()
+    let privacy = WindowPrivacyManager(
+      hidesContent: { hidden }, windows: { [] }, applyCaptureExclusion: { _, _ in false },
+      notifications: NotificationCenter(), workspaceNotifications: NotificationCenter()
+    )
+    privacy.prepare(window)
+    XCTAssertEqual(window.sharingType, .none)
+    hidden = false
+    privacy.reapplyAll()
+    XCTAssertEqual(window.sharingType, .readOnly)
   }
 
   func testPreparingPanelDoesNotActivateOrReplaceKeyWindow() {

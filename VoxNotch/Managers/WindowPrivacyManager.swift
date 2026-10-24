@@ -12,6 +12,7 @@ final class WindowPrivacyManager: NSObject {
   private let hidesContent: () -> Bool
   private let windows: () -> [NSWindow]
   private let applyCaptureExclusion: @MainActor (NSWindow, CGSize?) -> Bool
+  private let refreshCaptureSurface: @MainActor (NSWindow, CGSize?) -> Void
   private let notifications: NotificationCenter
   private let workspaceNotifications: NotificationCenter
   private let registered = NSHashTable<NSWindow>.weakObjects()
@@ -25,12 +26,16 @@ final class WindowPrivacyManager: NSObject {
     applyCaptureExclusion: @escaping @MainActor (NSWindow, CGSize?) -> Bool = {
       CaptureExclusion.apply(to: $0, size: $1)
     },
+    refreshCaptureSurface: @escaping @MainActor (NSWindow, CGSize?) -> Void = {
+      CaptureExclusion.refreshSurface(of: $0, size: $1)
+    },
     notifications: NotificationCenter = .default,
     workspaceNotifications: NotificationCenter = NSWorkspace.shared.notificationCenter
   ) {
     self.hidesContent = hidesContent
     self.windows = windows
     self.applyCaptureExclusion = applyCaptureExclusion
+    self.refreshCaptureSurface = refreshCaptureSurface
     self.notifications = notifications
     self.workspaceNotifications = workspaceNotifications
     super.init()
@@ -95,9 +100,14 @@ final class WindowPrivacyManager: NSObject {
       let exclusion = AppliedExclusion(
         windowNumber: window.windowNumber, size: hides ? window.frame.size : nil
       )
-      if force || exclusions.object(forKey: window) != exclusion {
+      let changed = exclusions.object(forKey: window) != exclusion
+      if force || changed {
         if applyCaptureExclusion(window, exclusion.size) {
           exclusions.setObject(exclusion, forKey: window)
+          // A successful CGS call alone can leave the previous unredacted surface in
+          // an active capture. Refresh on transitions, including clearing/resizing,
+          // but never on unchanged preparation during a view's drawing pass.
+          if changed { refreshCaptureSurface(window, exclusion.size) }
         } else {
           // Retry on the next update, e.g. once a deferred window gets its window number.
           exclusions.removeObject(forKey: window)
@@ -125,54 +135,6 @@ private final class AppliedExclusion: NSObject {
   }
 
   override var hash: Int { windowNumber }
-}
-
-/// Window-server capture exclusion, which Chromium switched its own screenshot protection to
-/// from `sharingType` in 2024. It redacts rather than hides: on macOS 27.0.1 ScreenCaptureKit
-/// renders the excluded region as a solid grey box. While `.none` is honoured it removes the
-/// window entirely and the grey box never shows; if a capture path ignores `.none`, this still
-/// keeps the content out. See CaptureExclusionPixelTests.
-///
-/// Undocumented SkyLight API, resolved at runtime so a macOS that drops it degrades to
-/// `sharingType` alone.
-enum CaptureExclusion {
-  private typealias MainConnectionID = @convention(c) () -> UInt32
-  private typealias SetWindowCaptureExcludeShape = @convention(c) (UInt32, Int, CFTypeRef?) -> Int32
-  private typealias RegionCreateWithRect = @convention(c) (CGRect) -> Unmanaged<CFTypeRef>?
-
-  private struct Symbols: @unchecked Sendable {
-    let mainConnectionID: MainConnectionID
-    let setExcludeShape: SetWindowCaptureExcludeShape
-    let regionCreate: RegionCreateWithRect
-  }
-
-  private static let symbols: Symbols? = {
-    guard let handle = dlopen(nil, RTLD_NOW),
-          let connection = dlsym(handle, "CGSMainConnectionID"),
-          let exclude = dlsym(handle, "CGSSetWindowCaptureExcludeShape"),
-          let region = dlsym(handle, "CGRegionCreateWithRect")
-    else { return nil }
-    return Symbols(
-      mainConnectionID: unsafeBitCast(connection, to: MainConnectionID.self),
-      setExcludeShape: unsafeBitCast(exclude, to: SetWindowCaptureExcludeShape.self),
-      regionCreate: unsafeBitCast(region, to: RegionCreateWithRect.self)
-    )
-  }()
-
-  static var isAvailable: Bool { symbols != nil }
-
-  /// Excludes the window's `size` region from capture, or clears the exclusion when `nil`.
-  /// Returns whether the window server accepted the request.
-  @MainActor
-  static func apply(to window: NSWindow, size: CGSize?) -> Bool {
-    guard let symbols, window.windowNumber > 0 else { return false }
-    var region: CFTypeRef?
-    if let size {
-      guard let created = symbols.regionCreate(CGRect(origin: .zero, size: size)) else { return false }
-      region = created.takeRetainedValue()
-    }
-    return symbols.setExcludeShape(symbols.mainConnectionID(), window.windowNumber, region) == 0
-  }
 }
 
 /// Prepares persistent document/settings windows before every show, including reopens.

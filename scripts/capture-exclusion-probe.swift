@@ -3,13 +3,10 @@
 //
 // Usage: capture-exclusion-probe <none|cgs|both> <x> <y> <width> <height> [hidden]
 // (top-left global coordinates in points). Shows an unprotected magenta window (kept off
-// screen with `hidden`), prints READY, then accepts `protect`, `show`, `repaint` and `quit`
-// lines on stdin.
+// screen with `hidden`), prints READY, then accepts protect/unprotect/show/grow/repaint/quit.
+// Compile with VoxNotch/Managers/CaptureExclusion.swift so this exercises production code.
 import AppKit
-
-typealias MainConnectionID = @convention(c) () -> UInt32
-typealias SetWindowCaptureExcludeShape = @convention(c) (UInt32, Int, CFTypeRef?) -> Int32
-typealias RegionCreateWithRect = @convention(c) (CGRect) -> Unmanaged<CFTypeRef>?
+import SwiftUI
 
 let args = CommandLine.arguments
 guard args.count == 6 || args.count == 7, let x = Double(args[2]), let y = Double(args[3]),
@@ -19,6 +16,8 @@ else {
   exit(2)
 }
 let mode = args[1]
+guard ["none", "cgs", "both"].contains(mode) else { exit(2) }
+var protected = false
 setvbuf(stdout, nil, _IOLBF, 0)
 
 let app = NSApplication.shared
@@ -31,47 +30,67 @@ let window = NSWindow(
 window.backgroundColor = NSColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
 window.level = .statusBar
 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+var hosting: NSHostingView<Color>?
+if ProcessInfo.processInfo.environment["VOXNOTCH_PROBE_SWIFTUI"] == "1" {
+  let view = NSHostingView(rootView: Color(nsColor: window.backgroundColor))
+  view.sizingOptions = []
+  window.contentView = view
+  hosting = view
+}
 if args.count == 6 { window.orderFrontRegardless() }
 
-func excludeWithCGS() -> Bool {
-  let handle = dlopen(nil, RTLD_NOW)
-  guard let c = dlsym(handle, "CGSMainConnectionID"),
-        let e = dlsym(handle, "CGSSetWindowCaptureExcludeShape"),
-        let r = dlsym(handle, "CGRegionCreateWithRect"),
-        let region = unsafeBitCast(r, to: RegionCreateWithRect.self)(
-          CGRect(origin: .zero, size: window.frame.size)
-        )?.takeRetainedValue()
-  else { return false }
-  let connection = unsafeBitCast(c, to: MainConnectionID.self)()
-  return unsafeBitCast(e, to: SetWindowCaptureExcludeShape.self)(connection, window.windowNumber, region) == 0
-}
+@MainActor
+private enum ProbeCommands {
+  static func updateProtection() -> Bool {
+    if mode != "cgs" { window.sharingType = protected ? .none : .readOnly }
+    if mode != "none" {
+      guard CaptureExclusion.apply(to: window, size: protected ? window.frame.size : nil) else { return false }
+      CaptureExclusion.refreshSurface(of: window, size: protected ? window.frame.size : nil)
+    }
+    return true
+  }
 
-func handle(_ command: String) {
-  switch command {
-  case "protect":
-    var ok = true
-    if mode == "none" || mode == "both" { window.sharingType = .none }
-    if mode == "cgs" || mode == "both" { ok = excludeWithCGS() }
-    print("OK protect \(ok)")
-  case "show":
-    window.orderFrontRegardless()
-    print("OK show")
-  case "repaint":
-    // A barely different magenta, so the capturer sees damage without a colour change.
-    let red = window.backgroundColor.redComponent
-    window.backgroundColor = NSColor(srgbRed: red == 1 ? 0.98 : 1, green: 0, blue: 1, alpha: 1)
-    print("OK repaint")
-  case "quit":
-    exit(0)
-  default:
-    print("ERR \(command)")
+  static func handle(_ command: String) {
+    switch command {
+    case "rapidOn", "rapidOff":
+      protected = command == "rapidOff"
+      let first = updateProtection()
+      // Leave the old refresh's delayed phase pending when the preference changes.
+      DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) {
+        protected.toggle()
+        print("OK \(command) \(ProbeCommands.updateProtection() && first)")
+      }
+    case "protect", "unprotect":
+      protected = command == "protect"
+      print("OK \(command) \(updateProtection())")
+    case "grow":
+      var frame = window.frame
+      frame.origin.y -= 80
+      frame.size.width += 80
+      frame.size.height += 80
+      window.setFrame(frame, display: false)
+      print("OK grow \(updateProtection())")
+    case "show":
+      window.orderFrontRegardless()
+      print("OK show")
+    case "repaint":
+      // A barely different magenta, so the capturer sees damage without a colour change.
+      let red = window.backgroundColor.redComponent
+      window.backgroundColor = NSColor(srgbRed: red == 1 ? 0.98 : 1, green: 0, blue: 1, alpha: 1)
+      hosting?.rootView = Color(nsColor: window.backgroundColor)
+      print("OK repaint")
+    case "quit":
+      exit(0)
+    default:
+      print("ERR \(command)")
+    }
   }
 }
 
 Thread.detachNewThread {
   while let line = readLine() {
     let command = line.trimmingCharacters(in: .whitespaces)
-    DispatchQueue.main.async { handle(command) }
+    DispatchQueue.main.async { ProbeCommands.handle(command) }
   }
   exit(0)
 }
