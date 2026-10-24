@@ -32,9 +32,26 @@ are retained for seven days, including on failure.
 DMG creation uses `create-dmg --skip-jenkins` to avoid Finder AppleScript timeouts
 in unattended environments. The Applications link remains available; custom
 icon placement is skipped.
-The release uses ad-hoc signing to seal the app bundle but remains unnotarized.
-Developer ID signing and notarization require Apple distribution credentials
-and are not configured by these workflows.
+## Signing
+
+Releases are signed with a stable self-signed certificate ("VoxNotch Release
+Signing", SHA-1 `A722522038615D41E96104CBE6110D94EAD809B4`, valid until 2046).
+macOS ties permission grants (Microphone, Screen & System Audio Recording,
+Accessibility) and Keychain access to the app's designated requirement, which is
+`identifier "com.jingyuanliang.VoxNotch" and certificate root = H"<sha1>"`. With
+ad-hoc signing that requirement is a per-build cdhash, so every update looked like
+a new app and re-prompted for everything; with a fixed certificate grants survive
+updates.
+
+- The `.p12` and its password live in the `MACOS_SIGNING_CERT_P12` (base64) and
+  `MACOS_SIGNING_CERT_PASSWORD` repository secrets. The workflow imports them into
+  a temporary keychain, signs nested code and then the app, and fails unless the
+  designated requirement is pinned to `SIGNING_CERT_SHA1`.
+- Never replace the certificate: a new one changes the designated requirement and
+  every user loses their permissions again. Keep the backup `.p12` and password
+  (created in `~/VoxNotch-signing/`) in a password manager.
+- The app remains unnotarized. Developer ID signing and notarization require Apple
+  distribution credentials and are not configured.
 
 ## Previous release failure
 

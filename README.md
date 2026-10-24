@@ -100,8 +100,12 @@ Grab the latest `.dmg` from the [Releases page](https://github.com/owenljy/VoxNo
 2. Launch VoxNotch — macOS will ask for **Accessibility** and **Microphone** permissions on first run
 3. The VoxNotch icon appears in the menu bar — hold ⌃⌥ to start recording
 
-Release builds are ad-hoc signed, not Developer ID signed or notarized. macOS may
-block the first launch of a downloaded copy. After verifying the download from
+Release builds are signed with a stable self-signed VoxNotch certificate, not a
+Developer ID, and are not notarized. Because the signing identity never changes,
+macOS keeps your Microphone, Screen & System Audio Recording, Accessibility and
+Keychain approvals across updates (builds before 0.5.2 were ad-hoc signed, so the
+first update to a self-signed build asks once more). macOS may still block the
+first launch of a downloaded copy. After verifying the download from
 the Releases page, use System Settings → Privacy & Security → Open Anyway if
 you choose to trust it. See [Apple's guidance](https://support.apple.com/en-sg/guide/mac-help/mh40616/mac).
 

@@ -22,6 +22,11 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+    env:
+      # Stable self-signed identity: macOS keys permissions (microphone, screen
+      # recording, accessibility, Keychain) to the designated requirement, so every
+      # release must be signed by this exact certificate or users lose their grants.
+      SIGNING_CERT_SHA1: A722522038615D41E96104CBE6110D94EAD809B4
     steps:
       - uses: actions/checkout@v4
 
@@ -74,18 +79,51 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee "$RUNNER_TEMP/archive.log"
 
+      - name: Import signing certificate
+        env:
+          P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$P12_BASE64" ] || [ -z "$P12_PASSWORD" ]; then
+            echo "::error::MACOS_SIGNING_CERT_P12 / MACOS_SIGNING_CERT_PASSWORD secrets are missing"
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          # Self-signed, so it is listed as untrusted; codesign only needs the private key.
+          security find-identity -p codesigning "$keychain" | grep -q "$SIGNING_CERT_SHA1" \
+            || { echo "::error::Imported certificate does not match SIGNING_CERT_SHA1"; exit 1; }
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
       - name: Export and verify app version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           mkdir -p "$RUNNER_TEMP/export"
+          app="$RUNNER_TEMP/export/VoxNotch.app"
           cp -R "$RUNNER_TEMP/VoxNotch.xcarchive/Products/Applications/VoxNotch.app" "$RUNNER_TEMP/export/"
-          # CODE_SIGNING_ALLOWED=NO leaves a linker-signed executable whose
-          # resource seal is incomplete. Seal the exported bundle before DMG.
-          codesign --force --sign - \
+          # The archive is built unsigned; sign nested code first, then the bundle.
+          find "$app/Contents" \( -name "*.framework" -o -name "*.dylib" -o -name "*.xpc" -o -name "*.appex" \) -prune -print0 |
+            while IFS= read -r -d '' item; do
+              codesign --force --sign "$SIGNING_CERT_SHA1" --keychain "$SIGNING_KEYCHAIN" --timestamp=none "$item"
+            done
+          codesign --force --sign "$SIGNING_CERT_SHA1" --keychain "$SIGNING_KEYCHAIN" --timestamp=none \
             --entitlements VoxNotch/VoxNotch.entitlements \
-            "$RUNNER_TEMP/export/VoxNotch.app"
-          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/export/VoxNotch.app"
+            "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          requirement=$(codesign -d -r- "$app" 2>&1)
+          echo "$requirement"
+          echo "$requirement" | grep -qi "certificate root = H\"$SIGNING_CERT_SHA1\"" \
+            || { echo "::error::Designated requirement is not pinned to the release certificate"; exit 1; }
           app_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/export/VoxNotch.app/Contents/Info.plist")
           app_build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RUNNER_TEMP/export/VoxNotch.app/Contents/Info.plist")
           test "v$app_version" = "$RELEASE_TAG"
@@ -120,6 +158,7 @@ jobs:
           trap 'hdiutil detach "$mount_point"' EXIT
           app="$mount_point/VoxNotch.app"
           codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d -r- "$app" 2>&1 | grep -qi "certificate root = H\"$SIGNING_CERT_SHA1\""
           test "v$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$RELEASE_TAG"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = "$RELEASE_BUILD"
           test "$(lipo -archs "$app/Contents/MacOS/VoxNotch")" = arm64
@@ -132,6 +171,11 @@ jobs:
             ${{ runner.temp }}/VoxNotch.dmg.sha256
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then security delete-keychain "$SIGNING_KEYCHAIN" || true; fi
 
       - name: Save archive diagnostics
         if: always()
