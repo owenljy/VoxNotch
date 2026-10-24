@@ -130,3 +130,25 @@ the run belongs to this repository, is a successful push of `ci.yml`, and tests
 that exact commit before accepting it as the test gate. Without this input, it
 runs tests normally. The retry always checks out the specified tag for the build;
 it never moves the tag and refuses to replace an existing GitHub Release.
+
+## Verified v0.5.4 release (2026-10-24)
+
+[Release v0.5.4](https://github.com/owenljy/VoxNotch/releases/tag/v0.5.4)
+was published by [run 40100979493](https://github.com/owenljy/VoxNotch/actions/runs/40100979493).
+The workflow revision is `8a50caf`; the checked-out application tag still points
+to `58c50bd1441e837cf30f2cd5c7094152c27480b6`. The signing preflight verified
+[successful CI 40096813538](https://github.com/owenljy/VoxNotch/actions/runs/40096813538)
+for that exact commit (297 tests, zero failures, five conditional skips), then
+signed and verified a real executable before the release build. Both the signing
+preflight and build jobs completed successfully.
+
+The published DMG was downloaded and independently checked:
+
+- SHA-256: `ca05d36031f0c6a7595ad7a9096ba96b4b267f3323e1d84fb87f9731971dc42d`, matching both the uploaded checksum and GitHub's asset digest.
+- `hdiutil verify` and read-only mounting succeeded.
+- Packaged app: version `0.5.4`, build `11`, architecture `arm64`, identifier `com.jingyuanliang.VoxNotch`.
+- `codesign --verify --deep --strict` passed, and the designated requirement pins certificate root `a722522038615d41e96104cbe6110d94ead809b4`.
+
+The verification mount was detached. Release notes include all application changes
+since the last published version, v0.5.1, and the first stable-certificate upgrade
+note. Failed attempts did not move or replace any published tag or installer.
