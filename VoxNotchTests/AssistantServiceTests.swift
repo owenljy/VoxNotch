@@ -16,8 +16,10 @@ final class AssistantServiceTests: XCTestCase {
   }
 
   private var state: AlwaysOnState!
+  private var settings: AssistantSettings!
 
   override func setUp() async throws {
+    settings = AssistantSettings(readAPIKey: { _ in .value("test-key") })
     state = AlwaysOnState.shared
     state.begin(sources: [.microphone, .systemAudio])
   }
@@ -36,7 +38,7 @@ final class AssistantServiceTests: XCTestCase {
   }
 
   func testStreamsDeltasIntoAnswer() async throws {
-    let service = AssistantService(makeStream: { _, _ in
+    let service = AssistantService(settings: settings, makeStream: { _, _ in
       AsyncThrowingStream { continuation in
         Task {
           for delta in ["**Short", " answer**", "\n\n- point"] {
@@ -58,7 +60,7 @@ final class AssistantServiceTests: XCTestCase {
   }
 
   func testFailureKeepsPartialTextAndMessage() async throws {
-    let service = AssistantService(makeStream: { _, _ in
+    let service = AssistantService(settings: settings, makeStream: { _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield("Partial")
         continuation.finish(throwing: LLMError.apiError("401: bad key"))
@@ -71,8 +73,25 @@ final class AssistantServiceTests: XCTestCase {
     XCTAssertEqual(state.answers[0].trigger, .auto)
   }
 
+  func testKeychainApprovalFailureDoesNotStartProviderOrPrompt() {
+    let denied = AssistantSettings(readAPIKey: { interactive in
+      XCTAssertFalse(interactive, "Asking must only perform silent Keychain reads")
+      return .needsApproval
+    })
+    let service = AssistantService(settings: denied, makeStream: { _, _ in
+      XCTFail("A request must not start while the saved API key needs approval")
+      return AsyncThrowingStream { $0.finish() }
+    })
+    XCTAssertNil(service.ask(trigger: .auto))
+    XCTAssertFalse(service.isAnswering)
+    guard case .failed(let message) = state.answers.last?.status else {
+      return XCTFail("Expected an actionable permission failure")
+    }
+    XCTAssertTrue(message.contains("approval"))
+  }
+
   func testNewAskStopsPreviousAnswer() async throws {
-    let service = AssistantService(makeStream: { _, _ in
+    let service = AssistantService(settings: settings, makeStream: { _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield("first")
         // never finishes on its own
@@ -125,7 +144,7 @@ final class AssistantServiceTests: XCTestCase {
     let queue = try DatabaseQueue()
     try DatabaseManager.makeMigrator().migrate(queue)
     let history = AlwaysOnHistoryStore(databaseManager: queue, settings: HistorySettings())
-    let service = AssistantService(historyStore: history, makeStream: { _, _ in
+    let service = AssistantService(settings: settings, historyStore: history, makeStream: { _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield("speculative")
         continuation.finish()
@@ -146,7 +165,7 @@ final class AssistantServiceTests: XCTestCase {
     try DatabaseManager.makeMigrator().migrate(queue)
     let history = AlwaysOnHistoryStore(databaseManager: queue, settings: HistorySettings())
     let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
-    let service = AssistantService(historyStore: history, makeStream: { _, _ in stream })
+    let service = AssistantService(settings: settings, historyStore: history, makeStream: { _, _ in stream })
     service.ask(trigger: .manual)
     continuation.yield("partial")
     try await waitUntil { self.state.answers.first?.status == .streaming }
@@ -162,7 +181,7 @@ final class AssistantServiceTests: XCTestCase {
 
   func testNewSessionDropsOldAnswerAndReleasesRequestOwnership() async throws {
     let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
-    let service = AssistantService(makeStream: { _, _ in stream })
+    let service = AssistantService(settings: settings, makeStream: { _, _ in stream })
     service.ask(trigger: .manual)
     state.begin(sources: [.microphone])
     continuation.yield("old session")
@@ -175,14 +194,14 @@ final class AssistantServiceTests: XCTestCase {
   func testTimeoutRetriesSameAnswerAndRecordsTheActualFallbackModel() async throws {
     let clock = ManualFirstTokenDeadline()
     let harness = FirstTokenStreamHarness()
-    let settings = AssistantSettings.shared
+    let settings = self.settings!
     let previous = settings.fallbackModel
     settings.fallbackModel = "fallback-test"
     defer { settings.fallbackModel = previous }
     let queue = try DatabaseQueue()
     try DatabaseManager.makeMigrator().migrate(queue)
     let history = AlwaysOnHistoryStore(databaseManager: queue, settings: HistorySettings())
-    let service = AssistantService(
+    let service = AssistantService(settings: settings,
       historyStore: history, makeStream: { harness.stream($0, $1) },
       deadlineSleep: { try await clock.sleep($0) })
     defer { service.stop() }
@@ -208,7 +227,7 @@ final class AssistantServiceTests: XCTestCase {
   func testDiscardBeforeFirstTokenCancelsRequestWithoutRetryOrHistoryResurrection() async throws {
     let clock = ManualFirstTokenDeadline()
     let harness = FirstTokenStreamHarness()
-    let service = AssistantService(
+    let service = AssistantService(settings: settings,
       makeStream: { harness.stream($0, $1) }, deadlineSleep: { try await clock.sleep($0) })
     defer { service.stop() }
     let id = try XCTUnwrap(service.ask(trigger: .auto))
@@ -225,7 +244,7 @@ final class AssistantServiceTests: XCTestCase {
 
   func testImmediateStopDoesNotStartAnUnconsumedRequest() async throws {
     let harness = FirstTokenStreamHarness()
-    let service = AssistantService(makeStream: { harness.stream($0, $1) })
+    let service = AssistantService(settings: settings, makeStream: { harness.stream($0, $1) })
     service.ask(trigger: .auto)
     service.stop()
     for _ in 0..<10 { await Task.yield() }

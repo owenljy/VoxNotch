@@ -11,14 +11,14 @@ final class AutoTriggerCoordinatorTests: XCTestCase {
 
   func testDisablingAutoAnswerCancelsPreviouslyScheduledSilenceAnswer() async throws {
     let state = AlwaysOnState.shared
-    let settings = AssistantSettings.shared
+    let settings = AssistantSettings(readAPIKey: { _ in .value("test-key") })
     let previous = (settings.autoAnswer, settings.autoAnswerSilence)
     state.begin(sources: [.systemAudio])
     state.status = .running
     settings.autoAnswer = true
     settings.autoAnswerSilence = 0.05
     let calls = OSAllocatedUnfairLock(initialState: 0)
-    let assistant = AssistantService(historyStore: AlwaysOnHistoryStore(settings: DisabledHistory()), makeStream: { _, _ in
+    let assistant = AssistantService(settings: settings, historyStore: AlwaysOnHistoryStore(settings: DisabledHistory()), makeStream: { _, _ in
       calls.withLock { $0 += 1 }
       return AsyncThrowingStream { $0.finish() }
     })

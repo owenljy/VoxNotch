@@ -17,10 +17,10 @@ Apple Silicon Mac before releasing ASR changes; see `asr-evaluation.md`.
 
 Update both Debug and Release `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`
 in `VoxNotch.xcodeproj/project.pbxproj`, then update `CHANGELOG.md`.
-Current version: **0.5.2 (9)**.
+Current version: **0.5.3 (10)**.
 
 After committing and pushing the reviewed changes, push the corresponding
-`v0.5.2` tag to publish. The workflow checks the tag against the project version
+`v0.5.3` tag to publish. The workflow checks the tag against the project version
 and then against the archived app's `CFBundleShortVersionString`.
 Only stable `vMAJOR.MINOR.PATCH` tags are accepted.
 
@@ -66,3 +66,23 @@ Commit `eeac80a` replaces the generic `NSHostingView<Content>` subclass with a
 non-generic `NSHostingView<AnyView>` subclass. Keep that workaround until a
 tested toolchain no longer needs it. The v0.5.0 tag predates that fix; new releases
 must include it rather than rerunning the unchanged old tag.
+
+
+The [v0.5.2 attempt](https://github.com/owenljy/VoxNotch/actions/runs/40092999811)
+failed the test gate before archiving. Four assertions expected `.readOnly` after
+clearing `.none`, but AppKit can keep returning `.none` even after the setter is
+called. A standalone NSWindow probe on macOS 27 reproduced this without any app
+privacy manager. The unit fixture now records the requested setter value while
+still forwarding it to the real NSWindow; the separate opt-in capture pixel suite
+continues to assert that disabling protection restores actual visible content.
+AI streaming tests also inject their Keychain reader so a locally saved key's
+approval state cannot interfere with mocked providers. A regression test verifies
+that approval failures still prevent requests and never use interactive reads.
+No v0.5.2 installer was published; v0.5.3 includes the fixes and keeps the failed
+tag intact.
+
+Local validation for the retry: 297 tests, zero failures, five conditional skips.
+The additional capture check skipped because the newly built test host did not
+have Screen Recording permission. The earlier authorized build passed two rounds
+of the AppKit/SwiftUI capture matrix (32 tests, zero skips); production capture
+code is unchanged by this CI fix.

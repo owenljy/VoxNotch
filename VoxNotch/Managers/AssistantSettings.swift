@@ -175,7 +175,7 @@ final class AssistantSettings {
     get {
       access(keyPath: \.apiKey)
       if let cachedAPIKey { return cachedAPIKey }
-      switch KeychainStore.read(Self.apiKeyAccount, interactive: false) {
+      switch readAPIKey(false) {
       case .value(let stored):
         cachedAPIKey = stored
         return stored
@@ -193,11 +193,12 @@ final class AssistantSettings {
   }
 
   @ObservationIgnored private var cachedAPIKey: String?
+  @ObservationIgnored private let readAPIKey: (Bool) -> KeychainStore.ReadResult
 
   /// Silent check; never prompts.
   func checkAPIKeyAccess() -> APIKeyAccess {
     if let cachedAPIKey { return cachedAPIKey.isEmpty ? .missing : .available }
-    switch KeychainStore.read(Self.apiKeyAccount, interactive: false) {
+    switch readAPIKey(false) {
     case .value(let stored):
       cachedAPIKey = stored
       return .available
@@ -212,7 +213,7 @@ final class AssistantSettings {
   /// the permission check — never during a live session.
   @discardableResult
   func approveAPIKeyAccess() -> Bool {
-    guard case .value(let stored) = KeychainStore.read(Self.apiKeyAccount, interactive: true) else { return false }
+    guard case .value(let stored) = readAPIKey(true) else { return false }
     withMutation(keyPath: \.apiKey) { cachedAPIKey = stored }
     return true
   }
@@ -464,7 +465,10 @@ final class AssistantSettings {
 
   // MARK: - Init
 
-  private init() {
+  init(readAPIKey: @escaping (Bool) -> KeychainStore.ReadResult = {
+    KeychainStore.read(AssistantSettings.apiKeyAccount, interactive: $0)
+  }) {
+    self.readAPIKey = readAPIKey
     let defaults = UserDefaults.standard
     baseURL = defaults.string(forKey: Keys.baseURL) ?? Defaults.baseURL
     model = defaults.string(forKey: Keys.model) ?? Defaults.model

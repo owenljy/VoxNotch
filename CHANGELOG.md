@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.5.2
+## 0.5.3
+
+- Verify privacy restoration requests without relying on AppKit's stale `sharingType` readback, and isolate AI service tests from the machine's Keychain state. The v0.5.2 attempt failed the test gate and did not publish an installer.
 
 - Add a QR-paired Phone View on the same Wi-Fi, with live transcripts and answers, independent answer history, adjustable panes, and iPad layouts. Enabling it hides the Mac panes while keeping the pairing window available.
 - Add a horizontal answer history rail with hover previews, click-to-lock, and double-click-to-return.
@@ -12,7 +14,7 @@
 - Improve the Coding Interview template with Python-only, plain-spoken answers, and add configurable reasoning effort.
 - Sign releases with a stable certificate to preserve the app identity across future updates. **This is the first release using that certificate: upgrading from an earlier ad-hoc-signed version may require granting macOS permissions again once.**
 
-Build number: 9.
+Build number: 10.
 
 ## 0.5.1
 

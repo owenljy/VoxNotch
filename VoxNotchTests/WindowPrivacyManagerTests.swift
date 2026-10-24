@@ -4,8 +4,8 @@ import XCTest
 
 @MainActor
 final class WindowPrivacyManagerTests: XCTestCase {
-  private func window() -> NSWindow {
-    let window = NSWindow(
+  private func window() -> SharingRequestWindow {
+    let window = SharingRequestWindow(
       contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
       styleMask: [.borderless], backing: .buffered, defer: false
     )
@@ -30,8 +30,8 @@ final class WindowPrivacyManagerTests: XCTestCase {
     appWindows = [late]
     hidden = false
     notifications.post(name: .hideFromScreenRecordingChanged, object: nil)
-    XCTAssertEqual(first.sharingType, .readOnly)
-    XCTAssertEqual(late.sharingType, .readOnly)
+    XCTAssertEqual(first.lastSharingRequest, .readOnly)
+    XCTAssertEqual(late.lastSharingRequest, .readOnly)
 
     hidden = true
     notifications.post(name: .hideFromScreenRecordingChanged, object: nil)
@@ -53,8 +53,8 @@ final class WindowPrivacyManagerTests: XCTestCase {
     XCTAssertEqual(child.sharingType, .none)
     hidden = false
     privacy.reapplyAll()
-    XCTAssertEqual(parent.sharingType, .readOnly)
-    XCTAssertEqual(child.sharingType, .readOnly)
+    XCTAssertEqual(parent.lastSharingRequest, .readOnly)
+    XCTAssertEqual(child.lastSharingRequest, .readOnly)
   }
 
   func testLifecycleEventsRepairDriftWithoutChangingPreference() {
@@ -290,7 +290,7 @@ final class WindowPrivacyManagerTests: XCTestCase {
     XCTAssertEqual(window.sharingType, .none)
     hidden = false
     privacy.reapplyAll()
-    XCTAssertEqual(window.sharingType, .readOnly)
+    XCTAssertEqual(window.lastSharingRequest, .readOnly)
   }
 
   func testPreparingPanelDoesNotActivateOrReplaceKeyWindow() {
@@ -321,5 +321,22 @@ private final class FirstDrawProbe: NSView {
     guard !didDraw else { return }
     didDraw = true
     onFirstDraw?(window?.sharingType)
+  }
+}
+
+// AppKit can keep returning .none after accepting a .readOnly setter (reproduced
+// without the app on macOS 27 and seen on the macOS 26 CI runner). Record the
+// actual setter request while still forwarding it to the real NSWindow. Native
+// capture restoration is covered by CaptureExclusionPixelTests in a separate app.
+@MainActor
+private final class SharingRequestWindow: NSWindow {
+  private(set) var lastSharingRequest: NSWindow.SharingType?
+
+  override var sharingType: NSWindow.SharingType {
+    get { super.sharingType }
+    set {
+      lastSharingRequest = newValue
+      super.sharingType = newValue
+    }
   }
 }
